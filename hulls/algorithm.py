@@ -205,7 +205,10 @@ class Population:
 
     def get_num_pairs(self, label=None):
         if label is None:
-            return sum(sum(count for count in avl_tree.values()) for avl_tree in self.hulls_left)
+            return sum(
+                sum(count for count in avl_tree.values())
+                for avl_tree in self.hulls_left
+            )
         else:
             return sum(count for count in self.hulls_left[label].values())
 
@@ -288,6 +291,7 @@ class Population:
         find the index of an ancestor in population
         """
         return self._ancestors[indv.label].index(indv)
+
 
 class RateMap:
     def __init__(self, positions, rates):

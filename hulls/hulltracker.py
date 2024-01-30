@@ -196,25 +196,6 @@ class Simulator:
     def change_migration_matrix_element(self, pop_i, pop_j, rate):
         self.migration_matrix[pop_i][pop_j] = rate
 
-    def insert_hull(self, pop, label, hull):
-        # insert left
-        avl_tree = self.P[pop].hulls_left[label]
-        ranks_left = self.P[pop].hulls_left_rank[label]
-        ranks_right = self.P[pop].hulls_right_rank[label]
-        if hull.left == 0:
-            count = ranks_left.get_cumulative_sum(hull.left + 1)
-        else:
-            num_ending_before_hull = ranks_right.get_cumulative_sum(hull.left)
-            num_starting_after_hull = ranks_left.get_cumulative_sum(hull.left + 1)
-            count = num_starting_after_hull - num_ending_before_hull
-        avl_tree[hull] = count
-        # update ranks
-        self.P[pop].hulls_left_rank[label].increment(hull.left + 1, 1)
-        self.P[pop].hulls_right_rank[label].increment(hull.right + 1, 1)
-
-    def remove_hull(self):
-        pass
-
     def _alloc_hull(self, left, right, segment_ptr):
         hull = self.hull_stack.pop()
         hull.left = int(left)
@@ -267,6 +248,12 @@ class Simulator:
         if self.gc_mass_index is not None:
             self.gc_mass_index[u.label].set_value(u.index, 0)
         self.segment_stack.append(u)
+
+    def free_hull(self, u):
+        """
+        Frees the specified hull making it ready for reuse.
+        """
+        self.hull_stack.append(u)
 
     def store_node(self, population, flags=0):
         self.flush_edges()
@@ -408,32 +395,6 @@ class Simulator:
                 return pop._ancestors[label][individual_index]
             individual_index -= num_ancestors
         raise AssertionError()
-
-    def get_random_pair(self, random_pair, random_count, pop, label):
-        avl = self.P[pop].hulls_left[label]
-        if len(self.P) > 1:
-            raise ValueError("Case for more than one population not implemented yet.")
-        
-        # pick first lineage by traversing the avl tree until 
-        # the cumulative count of the keys (coalesceable pairs)
-        # matches random_count
-        for hull, pairs_count in avl.items():
-            if random_count < pairs_count:
-                random_pair[0] = hull.index
-                break
-            else:
-                random_count -= pairs_count
-        left = hull.left
-        
-        # pick second lineage
-        # traverse avl_tree towards smallest element until we 
-        # find the random_count^th element that can coalesce with
-        # the first picked hull.
-        while random_count >= 0:
-            hull = avl.prev_key(hull)
-            if hull.left == left or hull.right > left:
-                random_count -= 1
-        random_pair[-1] = hull.index
 
     def simulate_smc(self, end_time):
         """
@@ -881,117 +842,6 @@ class Simulator:
             self.store_arg_edges(z, new_node_id)
         return new_node_id
 
-    def merge_ancestors(self, H, pop_id, label, new_node_id=-1):
-        pop = self.P[pop_id]
-        defrag_required = False
-        coalescence = False
-        pass_through = len(H) == 1
-        alpha = None
-        z = None
-        merged_head = None
-        while len(H) > 0:
-            alpha = None
-            left = H[0][0]
-            X = []
-            r_max = self.L
-            while len(H) > 0 and H[0][0] == left:
-                x = heapq.heappop(H)[1]
-                X.append(x)
-                r_max = min(r_max, x.right)
-            if len(H) > 0:
-                r_max = min(r_max, H[0][0])
-            if len(X) == 1:
-                x = X[0]
-                if len(H) > 0 and H[0][0] < x.right:
-                    alpha = self.alloc_segment(x.left, H[0][0], x.node, x.population)
-                    alpha.label = label
-                    x.left = H[0][0]
-                    heapq.heappush(H, (x.left, x))
-                else:
-                    if x.next is not None:
-                        y = x.next
-                        heapq.heappush(H, (y.left, y))
-                    alpha = x
-                    alpha.next = None
-            else:
-                coalescence = True
-                if new_node_id == -1:
-                    new_node_id = self.store_node(pop_id)
-                # We must also break if the next left value is less than
-                # any of the right values in the current overlap set.
-                if left not in self.S:
-                    j = self.S.floor_key(left)
-                    self.S[left] = self.S[j]
-                if r_max not in self.S:
-                    j = self.S.floor_key(r_max)
-                    self.S[r_max] = self.S[j]
-                # Update the number of extant segments.
-                min_overlap = len(X)
-                if self.stop_condition is not None:
-                    min_overlap = 0
-                if self.S[left] == min_overlap:
-                    self.S[left] = 0
-                    right = self.S.succ_key(left)
-                else:
-                    right = left
-                    while right < r_max and self.S[right] != min_overlap:
-                        self.S[right] -= len(X) - 1
-                        right = self.S.succ_key(right)
-                    alpha = self.alloc_segment(left, right, new_node_id, pop_id)
-                # Update the heaps and make the record.
-                for x in X:
-                    if x.node != new_node_id:  # required for dtwf and fixed_pedigree
-                        self.store_edge(left, right, new_node_id, x.node)
-                    if x.right == right:
-                        self.free_segment(x)
-                        if x.next is not None:
-                            y = x.next
-                            heapq.heappush(H, (y.left, y))
-                    elif x.right > right:
-                        x.left = right
-                        heapq.heappush(H, (x.left, x))
-
-            # loop tail; update alpha and integrate it into the state.
-            if alpha is not None:
-                if z is None:
-                    pop.add(alpha, label)
-                    merged_head = alpha
-                else:
-                    if (coalescence and not self.coalescing_segments_only) or (
-                        self.additional_nodes.value & msprime.NODE_IS_CA_EVENT > 0
-                    ):
-                        defrag_required |= z.right == alpha.left
-                    else:
-                        defrag_required |= (
-                            z.right == alpha.left and z.node == alpha.node
-                        )
-                    z.next = alpha
-                alpha.prev = z
-                self.set_segment_mass(alpha)
-                z = alpha
-        if coalescence:
-            if not self.coalescing_segments_only:
-                self.store_arg_edges(z, new_node_id)
-        else:
-            if not pass_through:
-                if self.additional_nodes.value & msprime.NODE_IS_CA_EVENT > 0:
-                    new_node_id = self.store_additional_nodes_edges(
-                        msprime.NODE_IS_CA_EVENT, new_node_id, z
-                    )
-            else:
-                if self.additional_nodes.value & msprime.NODE_IS_PASS_THROUGH > 0:
-                    assert new_node_id != -1
-                    assert self.model == "fixed_pedigree"
-                    new_node_id = self.store_additional_nodes_edges(
-                        msprime.NODE_IS_PASS_THROUGH, new_node_id, z
-                    )
-
-        if defrag_required:
-            self.defrag_segment_chain(z)
-        if coalescence:
-            self.defrag_breakpoints()
-        return merged_head
-
     def defrag_segment_chain(self, z):
         y = z
         while y.prev is not None:
@@ -1021,11 +871,17 @@ class Simulator:
         Implements a coancestry event.
         """
         pop = self.P[population_index]
-        # Choose two ancestors uniformly.
-        j = random.randint(0, pop.get_num_ancestors(label) - 1)
-        x = pop.remove(j, label)
-        j = random.randint(0, pop.get_num_ancestors(label) - 1)
-        y = pop.remove(j, label)
+        # Choose two ancestors uniformly according to hulls_left weights
+        random_pair = -np.ones(2, dtype=np.int64)
+        num_pairs = pop.get_num_pairs()
+        random_count = random.randint(0, num_pairs - 1)
+        pop.get_random_pair(random_pair, random_count, label)
+        ih, jh = random_pair
+        i = self.hulls[ih].segment_ptr
+        j = self.hulls[jh].segment_ptr
+        # adapt coalescence logic to work with avl tree
+        x = pop.remove(j, label, ih)
+        y = pop.remove(j, label, jh)
         self.merge_two_ancestors(population_index, label, x, y)
 
     def merge_two_ancestors(self, population_index, label, x, y, u=-1):
@@ -1112,7 +968,11 @@ class Simulator:
             # loop tail; update alpha and integrate it into the state.
             if alpha is not None:
                 if z is None:
-                    pop.add(alpha, label)
+                    # FIX ME
+                    #right = -1
+                    #hull = self._alloc_hull(alpha.left, right, alpha.index)
+                    hull = None
+                    pop.add(alpha, label, hull)
                 else:
                     if (coalescence and not self.coalescing_segments_only) or (
                         self.additional_nodes.value & msprime.NODE_IS_CA_EVENT > 0

@@ -1,3 +1,4 @@
+import copy
 import math
 import numpy as np
 import pytest
@@ -8,20 +9,8 @@ import hulls.hulltracker as tracker
 
 
 class TestAVL:
-    def test_avl(self):
-        tables = tskit.TableCollection(100)
-        tables.populations.add_row()
-        sample_count = 10
-        for _ in range(sample_count):
-            tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0, population=0)
-        sim = tracker.Simulator(
-            initial_state=tables,
-        )
-        sim.print_state()
-        pairs = sim.P[0].get_num_pairs()
-        assert pairs == math.comb(10, 2)
-
-    def test_setup_simple(self):
+    @pytest.fixture(scope="class")
+    def pre_defined_tables(self):
         # 2.00┊ 6 9 7 8 ┊  9  7 8 ┊  9  7 5 ┊ 911 7 5 ┊ 1011 7 5 ┊ 1011  5  ┊
         #     ┊ ┃ ┃ ┃ ┃ ┊  ┃  ┃ ┃ ┊  ┃  ┃ ┃ ┊ ┃ ┃ ┃ ┃ ┊ ┃  ┃ ┃ ┃ ┊ ┃  ┃ ┏┻┓ ┊
         # 1.00┊ ┃ 4 ┃ ┃ ┊  4  ┃ ┃ ┊  4  ┃ ┃ ┊ 4 ┃ ┃ ┃ ┊ ┃  ┃ ┃ ┃ ┊ ┃  ┃ ┃ ┃ ┊
@@ -58,6 +47,23 @@ class TestAVL:
         tables.edges.add_row(left=50, right=100, parent=10, child=0)
         tables.edges.add_row(left=40, right=100, parent=11, child=1)
         tables.sort()
+        return tables
+
+    def test_avl(self):
+        tables = tskit.TableCollection(100)
+        tables.populations.add_row()
+        sample_count = 10
+        for _ in range(sample_count):
+            tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0, population=0)
+        sim = tracker.Simulator(
+            initial_state=tables,
+        )
+        sim.print_state()
+        pairs = sim.P[0].get_num_pairs()
+        assert pairs == math.comb(10, 2)
+
+    def test_setup_simple(self, pre_defined_tables):
+        tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
         num_pairs = sim.P[0].get_num_pairs()
         assert num_pairs == 14
@@ -66,7 +72,7 @@ class TestAVL:
         label = 0
         obs_pairs = set()
         for i in range(num_pairs):
-            sim.get_random_pair(random_pair, i, pop, label)
+            sim.P[label].get_random_pair(random_pair, i, label)
             obs_pairs.add(tuple(random_pair))
         # node_to_hull_idx = {5:100, 6:99, 7:98, 8:97, 9:96, 10:95, 11:94}
         all_random_pairs = set(
@@ -88,6 +94,35 @@ class TestAVL:
             ]
         )
         assert obs_pairs == all_random_pairs
+        # add in new hull
+        old_state = copy.deepcopy(sim.P[0].hulls_left[0])
+        left = 45
+        right = 65
+        seg_index = -1
+        new_hull = sim._alloc_hull(left, right, seg_index)
+        sim.P[0].add_hull(0, new_hull)
+        assert sim.P[0].hulls_left[0][new_hull] == 4
+        # remove this hull again
+        sim.P[0].remove_hull(0, new_hull)
+        sim.free_hull(new_hull)
+        # should be restored to old state
+        for key, value in sim.P[0].hulls_left[0].items():
+            assert old_state[key] == value
+        # add in new hull
+        left = 20
+        right = 60
+        new_hull = sim._alloc_hull(left, right, seg_index)
+        sim.P[0].add_hull(0, new_hull)
+        assert sim.P[0].hulls_left[0][new_hull] == 3
+        # remove this hull again
+        sim.P[0].remove_hull(0, new_hull)
+        sim.free_hull(new_hull)
+        for key, value in sim.P[0].hulls_left[0].items():
+            assert old_state[key] == value
+
+    def test_coalescence_event(self, pre_defined_tables):
+        tables = pre_defined_tables
+        assert True
 
 
 def make_initial_state(sample_configuration, sequence_length):

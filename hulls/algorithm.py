@@ -171,7 +171,7 @@ class Population:
         self.hulls_left_rank = [None for _ in range(num_labels)]
         # track rank of hulls_right
         self.hulls_right_rank = [None for _ in range(num_labels)]
-        self.pairs_counter = [None for _ in range(num_labels)]
+        self.num_pairs = np.zeros(num_labels, dtype=np.uint64)
 
     def print_state(self):
         print("Population ", self.id)
@@ -204,6 +204,7 @@ class Population:
             return len(self._ancestors[label])
 
     def get_num_pairs(self, label=None):
+        # can be improved by updating values in self.num_pairs
         if label is None:
             return sum(
                 sum(count for count in avl_tree.values())
@@ -242,6 +243,29 @@ class Population:
                     ret = math.log(z) / self.growth_rate
         return ret
 
+    def get_random_pair(self, random_pair, random_count, label):
+        avl = self.hulls_left[label]
+        # pick first lineage by traversing the avl tree until
+        # the cumulative count of the keys (coalesceable pairs)
+        # matches random_count
+        for hull, pairs_count in avl.items():
+            if random_count < pairs_count:
+                random_pair[0] = hull.index
+                break
+            else:
+                random_count -= pairs_count
+        left = hull.left
+
+        # pick second lineage
+        # traverse avl_tree towards smallest element until we
+        # find the random_count^th element that can coalesce with
+        # the first picked hull.
+        while random_count >= 0:
+            hull = avl.prev_key(hull)
+            if hull.left == left or hull.right > left:
+                random_count -= 1
+        random_pair[-1] = hull.index
+
     def get_ind_range(self, t):
         """Returns ind labels at time t"""
         first_ind = np.sum([self.get_size(t_prev) for t_prev in range(0, int(t))])
@@ -249,10 +273,20 @@ class Population:
 
         return range(int(first_ind), int(last_ind) + 1)
 
-    def remove(self, index, label=0):
+    def remove_hull(self, label, hull):
+        count = self.hulls_left[label].pop(hull)
+        # self.num_pairs[label] -= count
+        # decrement rank
+        self.hulls_left_rank[label].increment(hull.left, -1)
+        self.hulls_right_rank[label].increment(hull.right, -1)
+
+    def remove(self, index, label=0, hull=None):
         """
         Removes and returns the individual at the specified index.
         """
+        # update hull information
+        if hull is not None:
+            self.remove_hull(label, hull)
         return self._ancestors[label].pop(index)
 
     def remove_individual(self, individual, label=0):
@@ -261,10 +295,35 @@ class Population:
         """
         return self._ancestors[label].remove(individual)
 
-    def add(self, individual, label=0):
+    def add_hull(self, label, hull):
+        left = hull.left
+        num_ending_before_left = self.hulls_right_rank[label].get_cumulative_sum(
+            hull.left + 1
+        )
+        num_starting_after_left = self.hulls_left_rank[label].get_cumulative_sum(
+            hull.left + 1
+        )
+        count = num_starting_after_left - num_ending_before_left
+        self.hulls_left[label][hull] = count
+        # correction is needed because the rank implementation in the Python version
+        # assumes that new hulls are added below hulls with the same starting point.
+        correction = 0
+        curr_hull = self.hulls_left[label].prev_key(hull)
+        while curr_hull.left == left:
+            correction += 1
+        self.hulls_left[label][hull] -= correction
+        # self.num_pairs[label] += count - correction
+        # increment rank
+        self.hulls_left_rank[label].increment(hull.left, 1)
+        self.hulls_right_rank[label].increment(hull.right, 1)
+
+    def add(self, individual, label=0, hull=None):
         """
         Inserts the specified individual into this population.
         """
+        # update hull information
+        if hull is not None:
+            self.add_hull(label, hull)
         assert individual.label == label
         self._ancestors[label].append(individual)
 

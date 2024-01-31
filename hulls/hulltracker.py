@@ -1,5 +1,8 @@
 import bintrees
+import msprime
 import numpy as np
+import random
+import tskit
 
 import hulls.algorithm as alg
 
@@ -8,7 +11,7 @@ class Hull:
     def __init__(self, index):
         self.left = None
         self.right = None
-        self.segment_ptr = None
+        self.ancestor_node = None
         # index should reflect insertion order
         self.index = index
         self.count = 0
@@ -32,6 +35,8 @@ class Simulator:
         gene_conversion_length=1,
         stop_condition=None,
         hull_offset=0,
+        coalescing_segments_only=True,
+        additional_nodes=None,
     ):
         N = 1  # num pops
         self.num_labels = 1
@@ -40,6 +45,9 @@ class Simulator:
         population_growth_rates = [0 for _ in range(self.num_populations)]
         if initial_state is None:
             raise ValueError("Requires an initial state.")
+        if isinstance(initial_state, tskit.TreeSequence):
+            initial_state = initial_state.dump_tables()
+        self.tables = initial_state
         self.L = int(initial_state.sequence_length)
 
         self.recomb_map = alg.RateMap([0, self.L], [recombination_rate, 0])
@@ -96,6 +104,10 @@ class Simulator:
         self.num_gc_events = 0
 
         self.stop_condition = stop_condition
+        self.coalescing_segments_only = coalescing_segments_only
+        if additional_nodes is None:
+            additional_nodes = 0
+        self.additional_nodes = msprime.NodeType(additional_nodes)
 
     def initialise(self, initial_state):
         tables = initial_state
@@ -140,13 +152,13 @@ class Simulator:
                 left_end = seg.left
                 pop = seg.population
                 label = seg.label
-                seg_index = seg.index
-                self.P[pop].add(seg)
+                ancestor_node = seg
+                self.P[seg.population].add(seg)
                 while seg is not None:
                     self.set_segment_mass(seg)
                     right_end = seg.right
                     seg = seg.next
-                new_hull = self._alloc_hull(left_end, right_end, seg_index)
+                new_hull = self._alloc_hull(left_end, right_end, ancestor_node)
                 self.P[pop].hulls_left[label][new_hull] = -1
 
         # initialise the correct coalesceable pairs count
@@ -196,11 +208,11 @@ class Simulator:
     def change_migration_matrix_element(self, pop_i, pop_j, rate):
         self.migration_matrix[pop_i][pop_j] = rate
 
-    def _alloc_hull(self, left, right, segment_ptr):
+    def _alloc_hull(self, left, right, ancestor_node):
         hull = self.hull_stack.pop()
         hull.left = int(left)
         hull.right = int(right) + self.hull_offset
-        hull.segment_ptr = segment_ptr
+        hull.ancestor_node = ancestor_node
 
         return hull
 
@@ -876,12 +888,15 @@ class Simulator:
         num_pairs = pop.get_num_pairs()
         random_count = random.randint(0, num_pairs - 1)
         pop.get_random_pair(random_pair, random_count, label)
-        ih, jh = random_pair
-        i = self.hulls[ih].segment_ptr
-        j = self.hulls[jh].segment_ptr
-        # adapt coalescence logic to work with avl tree
-        x = pop.remove(j, label, ih)
-        y = pop.remove(j, label, jh)
+        hull_i_ptr, hull_j_ptr = random_pair
+        hull_i = self.hulls[hull_i_ptr]
+        hull_j = self.hulls[hull_j_ptr]
+        x = hull_i.ancestor_node
+        y = hull_j.ancestor_node
+        pop.remove(x, label, hull_i)
+        pop.remove(y, label, hull_j)
+        self.free_hull(hull_i)
+        self.free_hull(hull_j)
         self.merge_two_ancestors(population_index, label, x, y)
 
     def merge_two_ancestors(self, population_index, label, x, y, u=-1):
@@ -968,11 +983,8 @@ class Simulator:
             # loop tail; update alpha and integrate it into the state.
             if alpha is not None:
                 if z is None:
-                    # FIX ME
-                    #right = -1
-                    #hull = self._alloc_hull(alpha.left, right, alpha.index)
-                    hull = None
-                    pop.add(alpha, label, hull)
+                    # print(alpha.left, alpha.right)
+                    pop.add(alpha, label, None)
                 else:
                     if (coalescence and not self.coalescing_segments_only) or (
                         self.additional_nodes.value & msprime.NODE_IS_CA_EVENT > 0
@@ -998,6 +1010,17 @@ class Simulator:
             self.defrag_segment_chain(z)
         if coalescence:
             self.defrag_breakpoints()
+
+        # create new hull and insert into population state
+        if z is not None:
+            left = z.left
+            u = z
+            while u is not None:
+                right = u.right
+                u = u.next
+            # which ancestor??
+            new_hull = self._alloc_hull(left, right, z)
+            pop.add_hull(label, new_hull)
 
     def print_state(self):
         for pop in self.P:

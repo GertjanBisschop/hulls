@@ -122,7 +122,14 @@ class TestAVL:
 
     def test_coalescence_event(self, pre_defined_tables):
         tables = pre_defined_tables
-        assert True
+        sim = tracker.Simulator(initial_state=tables)
+        print(sim.P[0]._ancestors[0])
+        self.t = 3.0
+        pop = 0
+        label= 0
+        sim.common_ancestor_event(pop, label)
+        print(sim.P[0]._ancestors[0])
+        assert False        
 
 
 def make_initial_state(sample_configuration, sequence_length):

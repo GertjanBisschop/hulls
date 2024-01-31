@@ -1,9 +1,8 @@
+import bintrees
 import math
+import numpy as np
 import random
 import sys
-
-import bintrees
-import numpy as np
 
 
 class FenwickTree:
@@ -245,7 +244,8 @@ class Population:
 
     def get_random_pair(self, random_pair, random_count, label):
         avl = self.hulls_left[label]
-        # pick first lineage by traversing the avl tree until
+        # pick first lineage
+        # by traversing the avl tree until
         # the cumulative count of the keys (coalesceable pairs)
         # matches random_count
         for hull, pairs_count in avl.items():
@@ -277,17 +277,17 @@ class Population:
         count = self.hulls_left[label].pop(hull)
         # self.num_pairs[label] -= count
         # decrement rank
-        self.hulls_left_rank[label].increment(hull.left, -1)
-        self.hulls_right_rank[label].increment(hull.right, -1)
+        self.hulls_left_rank[label].increment(hull.left + 1, -1)
+        self.hulls_right_rank[label].increment(hull.right + 1, -1)
 
-    def remove(self, index, label=0, hull=None):
+    def remove(self, individual, label=0, hull=None):
         """
         Removes and returns the individual at the specified index.
         """
         # update hull information
         if hull is not None:
             self.remove_hull(label, hull)
-        return self._ancestors[label].pop(index)
+        return self._ancestors[label].remove(individual)
 
     def remove_individual(self, individual, label=0):
         """
@@ -314,8 +314,8 @@ class Population:
         self.hulls_left[label][hull] -= correction
         # self.num_pairs[label] += count - correction
         # increment rank
-        self.hulls_left_rank[label].increment(hull.left, 1)
-        self.hulls_right_rank[label].increment(hull.right, 1)
+        self.hulls_left_rank[label].increment(hull.left + 1, 1)
+        self.hulls_right_rank[label].increment(hull.right + 1, 1)
 
     def add(self, individual, label=0, hull=None):
         """

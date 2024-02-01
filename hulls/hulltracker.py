@@ -65,6 +65,7 @@ class Simulator:
             self.segments[j + 1] = s
             self.segment_stack.append(s)
         self.hull_stack = []
+        # double check whether this is maintained/used.
         self.hulls = [None for _ in range(self.max_hulls + 1)]
         for j in range(self.max_segments):
             h = Hull(j + 1)
@@ -639,8 +640,24 @@ class Simulator:
             y.prev = None
             alpha = y
             lhs_tail = x
+        # modify original hull
+        lhs_hull.right = lhs_tail.right + self.hull_offset
+        # only lhs_hulls.right rank is affected
+        self.P[alpha.population].hulls_right_rank[label].increment(
+            lhs_hull.right + 1, 1
+        )
         self.set_segment_mass(alpha)
-        self.P[alpha.population].add(alpha, label)
+        # create hull for alpha
+        curr_segment = alpha
+        while curr_segment is not None:
+            right = curr_segment.right
+            curr_segment = curr_segment.next
+        alpha_hull = self._alloc_hull(alpha.left, right, alpha)
+        # decrement for removal of old hull, however, will be undone by add()
+        self.P[alpha.population].hulls_right_rank[label].increment(
+            alpha_hull.right + 1, -1
+        )
+        self.P[alpha.population].add(alpha, label, alpha_hull)
         if self.additional_nodes.value & msprime.NODE_IS_RE_EVENT > 0:
             self.store_node(lhs_tail.population, flags=msprime.NODE_IS_RE_EVENT)
             self.store_arg_edges(lhs_tail)
@@ -894,8 +911,8 @@ class Simulator:
         hull_j = self.hulls[hull_j_ptr]
         x = hull_i.ancestor_node
         y = hull_j.ancestor_node
-        print(f'random pair: {random_pair}')
-        print(f'coalescing:{x} + {y}')
+        print(f"random pair: {random_pair}")
+        print(f"coalescing:{x} + {y}")
         pop.remove(x, label, hull_i)
         pop.remove(y, label, hull_j)
         self.free_hull(hull_i)
@@ -1016,130 +1033,13 @@ class Simulator:
             self.defrag_breakpoints()
 
         # update right endpoint hull
+        # surely this can be improved upon
         while z is not None:
             right = z.right
             z = z.next
-        hull.right = int(right)
+        hull.right = int(right) + self.hull_offset
         pop.add_hull(label, hull)
 
     def print_state(self):
         for pop in self.P:
             pop.print_state()
-
-    def verify_segments(self):
-        for pop in self.P:
-            for label in range(self.num_labels):
-                for head in pop.iter_label(label):
-                    assert head.prev is None
-                    prev = head
-                    u = head.next
-                    while u is not None:
-                        assert prev.next is u
-                        assert u.prev is prev
-                        assert u.left >= prev.right
-                        assert u.label == head.label
-                        assert u.population == head.population
-                        prev = u
-                        u = u.next
-
-    def verify_overlaps(self):
-        overlap_counter = OverlapCounter(self.L)
-        for pop in self.P:
-            for label in range(self.num_labels):
-                for u in pop.iter_label(label):
-                    while u is not None:
-                        overlap_counter.increment_interval(u.left, u.right)
-                        u = u.next
-
-        for pos, count in self.S.items():
-            if pos != self.L:
-                assert count == overlap_counter.overlaps_at(pos)
-
-        assert self.S[self.L] == -1
-        # Check the ancestry tracking.
-        A = bintrees.AVLTree()
-        A[0] = 0
-        A[self.L] = -1
-        for pop in self.P:
-            for label in range(self.num_labels):
-                for u in pop.iter_label(label):
-                    while u is not None:
-                        if u.left not in A:
-                            k = A.floor_key(u.left)
-                            A[u.left] = A[k]
-                        if u.right not in A:
-                            k = A.floor_key(u.right)
-                            A[u.right] = A[k]
-                        k = u.left
-                        while k < u.right:
-                            A[k] += 1
-                            k = A.succ_key(k)
-                        u = u.next
-        # Now, defrag A
-        j = 0
-        k = 0
-        while k < self.L:
-            k = A.succ_key(j)
-            if A[j] == A[k]:
-                del A[k]
-            else:
-                j = k
-        assert list(A.items()) == list(self.S.items())
-
-    def verify_mass_index(self, label, mass_index, rate_map, compute_left_bound):
-        assert mass_index is not None
-        total_mass = 0
-        alt_total_mass = 0
-        for pop_index, pop in enumerate(self.P):
-            for u in pop.iter_label(label):
-                assert u.prev is None
-                left = compute_left_bound(u)
-                while u is not None:
-                    assert u.population == pop_index
-                    assert u.left < u.right
-                    left_bound = compute_left_bound(u)
-                    s = rate_map.mass_between(left_bound, u.right)
-                    right = u.right
-                    index_value = mass_index.get_value(u.index)
-                    total_mass += index_value
-                    assert math.isclose(s, index_value, abs_tol=1e-6)
-                    v = u.next
-                    if v is not None:
-                        assert v.prev == u
-                        assert u.right <= v.left
-                    u = v
-
-                s = rate_map.mass_between(left, right)
-                alt_total_mass += s
-        assert math.isclose(total_mass, mass_index.get_total(), abs_tol=1e-6)
-        assert math.isclose(total_mass, alt_total_mass, abs_tol=1e-6)
-
-    def verify(self):
-        """
-        Checks that the state of the simulator is consistent.
-        """
-        self.verify_segments()
-        if self.model != "fixed_pedigree":
-            # The fixed_pedigree model doesn't maintain a bunch of stuff.
-            # It would probably be simpler if it did.
-            self.verify_overlaps()
-            for label in range(self.num_labels):
-                if self.recomb_mass_index is None:
-                    assert self.recomb_map.total_mass == 0
-                else:
-                    self.verify_mass_index(
-                        label,
-                        self.recomb_mass_index[label],
-                        self.recomb_map,
-                        self.get_recomb_left_bound,
-                    )
-
-                if self.gc_mass_index is None:
-                    assert self.gc_map.total_mass == 0
-                else:
-                    self.verify_mass_index(
-                        label,
-                        self.gc_mass_index[label],
-                        self.gc_map,
-                        self.get_gc_left_bound,
-                    )

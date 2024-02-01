@@ -277,7 +277,7 @@ class Population:
         avl = self.hulls_left[label]
         right = hull.right
         curr_hull = hull
-        max_hull =  avl.max_key()
+        max_hull = avl.max_key()
         while curr_hull < max_hull:
             curr_hull = avl.succ_key(curr_hull)
             if right > curr_hull.left:
@@ -315,7 +315,7 @@ class Population:
         left = hull.left
         max_hull = self.hulls_left[label].max_key()
         curr_hull = hull
-        while curr_hull < max_hull: 
+        while curr_hull < max_hull:
             curr_hull = self.hulls_left[label].succ_key(curr_hull)
             if curr_hull.left == left:
                 correction += 1
@@ -336,9 +336,9 @@ class Population:
         self.hulls_left[label][hull] = count
         # correction is needed because the rank implementation in the Python version
         # assumes that new hulls are added below hulls with the same starting point.
-        print('pre_correction', self.hulls_left[label][hull])
+        print("pre_correction", self.hulls_left[label][hull])
         self.add_hull_count_correction(label, hull)
-        print('post_correction', self.hulls_left[label][hull])
+        print("post_correction", self.hulls_left[label][hull])
         # self.num_pairs[label] += count - correction
         # Adjust counts for existing hulls in the avl tree
         self.increment_avl(label, hull, 1)

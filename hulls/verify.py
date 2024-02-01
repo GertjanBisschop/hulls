@@ -1,3 +1,4 @@
+import bintrees
 import itertools
 
 import hulls.algorithm as alg
@@ -64,14 +65,14 @@ class OverlapCounter:
 
     def get_total(self):
         total = 0
-        curr_interval = self.overlap
+        curr_interval = self.overlaps
         while curr_interval is not None:
             total += curr_interval.node
             curr_interval = curr_interval.next
         return total
 
+
 def intersect_lineages(a, b):
-    
     while a is not None and b is not None:
         if a.right <= b.left:
             a = a.next
@@ -79,7 +80,7 @@ def intersect_lineages(a, b):
             b = b.next
         else:
             return 1
-            
+
     return 0
 
 
@@ -87,16 +88,24 @@ def verify_hulls(sim):
     for pop in sim.P:
         for label in range(sim.num_labels):
             # num ancestors and num hulls should be identical
-            assert len(pop.hulls_left[label]) == len(pop._ancestors[label])
-
+            num_lineages = len(pop._ancestors[label])
+            assert num_lineages == len(pop.hulls_left[label])
+            assert (
+                pop.hulls_left_rank[label].get_cumulative_sum(sim.L + 1) == num_lineages
+            )
+            assert (
+                pop.hulls_right_rank[label].get_cumulative_sum(sim.L + 1)
+                == num_lineages
+            )
             # verify counts in avl tree
             count = 0
             for a, b in itertools.combinations(pop._ancestors[label], 2):
                 # check if overlap
                 count += intersect_lineages(a, b)
             avl_pairs = pop.get_num_pairs(label)
-            print(count, avl_pairs)
+
             assert count == avl_pairs
+
 
 def verify_segments(sim):
     for pop in sim.P:
@@ -193,28 +202,27 @@ def verify(sim):
     """
     Checks that the state of the simulator is consistent.
     """
-    sim.verify_segments()
-    if sim.model != "fixed_pedigree":
-        # The fixed_pedigree model doesn't maintain a bunch of stuff.
-        # It would probably be simpler if it did.
-        sim.verify_overlaps()
-        for label in range(sim.num_labels):
-            if sim.recomb_mass_index is None:
-                assert sim.recomb_map.total_mass == 0
-            else:
-                sim.verify_mass_index(
-                    label,
-                    sim.recomb_mass_index[label],
-                    sim.recomb_map,
-                    sim.get_recomb_left_bound,
-                )
+    verify_segments(sim)
+    verify_overlaps(sim)
+    for label in range(sim.num_labels):
+        if sim.recomb_mass_index is None:
+            assert sim.recomb_map.total_mass == 0
+        else:
+            verify_mass_index(
+                sim,
+                label,
+                sim.recomb_mass_index[label],
+                sim.recomb_map,
+                sim.get_recomb_left_bound,
+            )
 
-            if sim.gc_mass_index is None:
-                assert sim.gc_map.total_mass == 0
-            else:
-                sim.verify_mass_index(
-                    label,
-                    sim.gc_mass_index[label],
-                    sim.gc_map,
-                    sim.get_gc_left_bound,
-                )
+        if sim.gc_mass_index is None:
+            assert sim.gc_map.total_mass == 0
+        else:
+            verify_mass_index(
+                sim,
+                label,
+                sim.gc_mass_index[label],
+                sim.gc_map,
+                sim.get_gc_left_bound,
+            )

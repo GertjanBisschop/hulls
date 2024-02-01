@@ -140,10 +140,9 @@ class TestAVL:
 
     def test_random_coalescence_event(self, pre_defined_tables):
         tables = pre_defined_tables
-        print(tables)
         sim = tracker.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
-        print('start state')
+        print('starting state')
         print(sim.P[0]._ancestors[0])
         print(sim.P[0].hulls_left[0])
         self.t = 3.0
@@ -154,6 +153,10 @@ class TestAVL:
         print(sim.P[0]._ancestors[0])
         print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
+        verify.verify(sim)
+
+    def test_recombination(self, pre_defined_tables):
+        pass
 
 
 

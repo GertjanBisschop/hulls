@@ -6,7 +6,8 @@ import tskit
 
 
 import hulls.hulltracker as tracker
-
+import hulls.verify as verify
+import hulls.algorithm as alg
 
 class TestAVL:
     @pytest.fixture(scope="class")
@@ -20,20 +21,20 @@ class TestAVL:
 
         tables = tskit.TableCollection(100)
         tables.nodes.metadata_schema = tskit.MetadataSchema.permissive_json()
-
+        tables.populations.add_row()
         ### nodes table
-        tables.nodes.add_row(flags=1, time=0)  # 0
-        tables.nodes.add_row(flags=1, time=0)  # 1
-        tables.nodes.add_row(flags=1, time=0)  # 2
-        tables.nodes.add_row(flags=1, time=0)  # 3
-        tables.nodes.add_row(flags=0, time=1)  # 4
-        tables.nodes.add_row(flags=0, time=2)  # 5
-        tables.nodes.add_row(flags=0, time=2)  # 6
-        tables.nodes.add_row(flags=0, time=2)  # 7
-        tables.nodes.add_row(flags=0, time=2)  # 8
-        tables.nodes.add_row(flags=0, time=2)  # 9
-        tables.nodes.add_row(flags=0, time=2)  # 10
-        tables.nodes.add_row(flags=0, time=2)  # 11
+        tables.nodes.add_row(flags=1, time=0, population=0)  # 0
+        tables.nodes.add_row(flags=1, time=0, population=0)  # 1
+        tables.nodes.add_row(flags=1, time=0, population=0)  # 2
+        tables.nodes.add_row(flags=1, time=0, population=0)  # 3
+        tables.nodes.add_row(flags=0, time=1, population=0)  # 4
+        tables.nodes.add_row(flags=0, time=2, population=0)  # 5
+        tables.nodes.add_row(flags=0, time=2, population=0)  # 6
+        tables.nodes.add_row(flags=0, time=2, population=0)  # 7
+        tables.nodes.add_row(flags=0, time=2, population=0)  # 8
+        tables.nodes.add_row(flags=0, time=2, population=0)  # 9
+        tables.nodes.add_row(flags=0, time=2, population=0)  # 10
+        tables.nodes.add_row(flags=0, time=2, population=0)  # 11
 
         # edges table
         tables.edges.add_row(left=10, right=50, parent=4, child=0)
@@ -58,9 +59,9 @@ class TestAVL:
         sim = tracker.Simulator(
             initial_state=tables,
         )
-        sim.print_state()
         pairs = sim.P[0].get_num_pairs()
         assert pairs == math.comb(10, 2)
+
 
     def test_setup_simple(self, pre_defined_tables):
         tables = pre_defined_tables
@@ -113,23 +114,47 @@ class TestAVL:
         right = 60
         new_hull = sim._alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
-        assert sim.P[0].hulls_left[0][new_hull] == 3
+        assert sim.P[0].hulls_left[0][new_hull] == 2
         # remove this hull again
         sim.P[0].remove_hull(0, new_hull)
         sim.free_hull(new_hull)
         for key, value in sim.P[0].hulls_left[0].items():
             assert old_state[key] == value
 
-    def test_coalescence_event(self, pre_defined_tables):
+    def test_coalescence_event_fixed(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
+        verify.verify_hulls(sim)
+        print('start state')
         print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        self.t = 3.0
+        pop = 0
+        label= 0
+        random_pair = np.array([98, 96], dtype=np.int64)
+        sim.common_ancestor_event(pop, label, random_pair)
+        print('after coalescence event')
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        verify.verify_hulls(sim)
+
+    def test_random_coalescence_event(self, pre_defined_tables):
+        tables = pre_defined_tables
+        print(tables)
+        sim = tracker.Simulator(initial_state=tables)
+        verify.verify_hulls(sim)
+        print('start state')
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
         self.t = 3.0
         pop = 0
         label= 0
         sim.common_ancestor_event(pop, label)
+        print('after coalescence event')
         print(sim.P[0]._ancestors[0])
-        assert False        
+        print(sim.P[0].hulls_left[0])
+        verify.verify_hulls(sim)
+
 
 
 def make_initial_state(sample_configuration, sequence_length):

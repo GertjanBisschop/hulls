@@ -878,21 +878,24 @@ class Simulator:
             else:
                 j = k
 
-    def common_ancestor_event(self, population_index, label):
+    def common_ancestor_event(self, population_index, label, random_pair=None):
         """
         Implements a coancestry event.
         """
         pop = self.P[population_index]
         # Choose two ancestors uniformly according to hulls_left weights
-        random_pair = -np.ones(2, dtype=np.int64)
-        num_pairs = pop.get_num_pairs()
-        random_count = random.randint(0, num_pairs - 1)
-        pop.get_random_pair(random_pair, random_count, label)
+        if random_pair is None:
+            random_pair = -np.ones(2, dtype=np.int64)
+            num_pairs = pop.get_num_pairs()
+            random_count = random.randint(0, num_pairs - 1)
+            pop.get_random_pair(random_pair, random_count, label)
         hull_i_ptr, hull_j_ptr = random_pair
         hull_i = self.hulls[hull_i_ptr]
         hull_j = self.hulls[hull_j_ptr]
         x = hull_i.ancestor_node
         y = hull_j.ancestor_node
+        print(f'random pair: {random_pair}')
+        print(f'coalescing:{x} + {y}')
         pop.remove(x, label, hull_i)
         pop.remove(y, label, hull_j)
         self.free_hull(hull_i)
@@ -983,7 +986,8 @@ class Simulator:
             # loop tail; update alpha and integrate it into the state.
             if alpha is not None:
                 if z is None:
-                    # print(alpha.left, alpha.right)
+                    # we do not know yet where the hull will end.
+                    hull = self._alloc_hull(alpha.left, alpha.right, alpha)
                     pop.add(alpha, label, None)
                 else:
                     if (coalescence and not self.coalescing_segments_only) or (
@@ -1011,16 +1015,12 @@ class Simulator:
         if coalescence:
             self.defrag_breakpoints()
 
-        # create new hull and insert into population state
-        if z is not None:
-            left = z.left
-            u = z
-            while u is not None:
-                right = u.right
-                u = u.next
-            # which ancestor??
-            new_hull = self._alloc_hull(left, right, z)
-            pop.add_hull(label, new_hull)
+        # update right endpoint hull
+        while z is not None:
+            right = z.right
+            z = z.next
+        hull.right = int(right)
+        pop.add_hull(label, hull)
 
     def print_state(self):
         for pop in self.P:

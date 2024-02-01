@@ -1,6 +1,6 @@
 import itertools
 
-from hulls import algorithm as alg
+import hulls.algorithm as alg
 
 
 class OverlapCounter:
@@ -70,10 +70,33 @@ class OverlapCounter:
             curr_interval = curr_interval.next
         return total
 
+def intersect_lineages(a, b):
+    
+    while a is not None and b is not None:
+        if a.right <= b.left:
+            a = a.next
+        elif a.left >= b.right:
+            b = b.next
+        else:
+            return 1
+            
+    return 0
+
 
 def verify_hulls(sim):
-    pass
+    for pop in sim.P:
+        for label in range(sim.num_labels):
+            # num ancestors and num hulls should be identical
+            assert len(pop.hulls_left[label]) == len(pop._ancestors[label])
 
+            # verify counts in avl tree
+            count = 0
+            for a, b in itertools.combinations(pop._ancestors[label], 2):
+                # check if overlap
+                count += intersect_lineages(a, b)
+            avl_pairs = pop.get_num_pairs(label)
+            print(count, avl_pairs)
+            assert count == avl_pairs
 
 def verify_segments(sim):
     for pop in sim.P:
@@ -94,16 +117,12 @@ def verify_segments(sim):
 
 def verify_overlaps(sim):
     overlap_counter = OverlapCounter(sim.L)
-    subtotal = 0
     for pop in sim.P:
         for label in range(sim.num_labels):
             for u in pop.iter_label(label):
                 while u is not None:
                     overlap_counter.increment_interval(u.left, u.right)
                     u = u.next
-            subtotal += pop.get_num_pairs(label)
-            overlap_counter_total = overlap_counter.get_total()
-            assert overlap_counter_total == subtotal
 
     for pos, count in sim.S.items():
         if pos != sim.L:

@@ -273,7 +273,20 @@ class Population:
 
         return range(int(first_ind), int(last_ind) + 1)
 
+    def increment_avl(self, label, hull, increment):
+        avl = self.hulls_left[label]
+        right = hull.right
+        curr_hull = hull
+        max_hull =  avl.max_key()
+        while curr_hull < max_hull:
+            curr_hull = avl.succ_key(curr_hull)
+            if right > curr_hull.left:
+                avl[curr_hull] += increment
+            else:
+                break
+
     def remove_hull(self, label, hull):
+        self.increment_avl(label, hull, -1)
         count = self.hulls_left[label].pop(hull)
         # self.num_pairs[label] -= count
         # decrement rank
@@ -295,6 +308,22 @@ class Population:
         """
         return self._ancestors[label].remove(individual)
 
+    def add_hull_count_correction(self, label, hull):
+        # correction is needed because the rank implementation in the Python version
+        # assumes that new hulls are added below hulls with the same starting point.
+        correction = 0
+        left = hull.left
+        max_hull = self.hulls_left[label].max_key()
+        curr_hull = hull
+        while curr_hull < max_hull: 
+            curr_hull = self.hulls_left[label].succ_key(curr_hull)
+            if curr_hull.left == left:
+                correction += 1
+            else:
+                break
+        print(correction)
+        self.hulls_left[label][hull] -= correction
+
     def add_hull(self, label, hull):
         left = hull.left
         num_ending_before_left = self.hulls_right_rank[label].get_cumulative_sum(
@@ -307,12 +336,12 @@ class Population:
         self.hulls_left[label][hull] = count
         # correction is needed because the rank implementation in the Python version
         # assumes that new hulls are added below hulls with the same starting point.
-        correction = 0
-        curr_hull = self.hulls_left[label].prev_key(hull)
-        while curr_hull.left == left:
-            correction += 1
-        self.hulls_left[label][hull] -= correction
+        print('pre_correction', self.hulls_left[label][hull])
+        self.add_hull_count_correction(label, hull)
+        print('post_correction', self.hulls_left[label][hull])
         # self.num_pairs[label] += count - correction
+        # Adjust counts for existing hulls in the avl tree
+        self.increment_avl(label, hull, 1)
         # increment rank
         self.hulls_left_rank[label].increment(hull.left + 1, 1)
         self.hulls_right_rank[label].increment(hull.right + 1, 1)

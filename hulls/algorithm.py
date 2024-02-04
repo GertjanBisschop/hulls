@@ -111,6 +111,7 @@ class Segment:
         self.population = None
         self.label = 0
         self.index = index
+        self.hull = None
 
     def __repr__(self):
         return repr((self.left, self.right, self.node))
@@ -132,13 +133,23 @@ class Segment:
         )
 
     def get_left_end(self):
+        seg = self
         while seg is not None:
             left = seg.left
             seg = seg.prev
 
         return left
 
+    def get_hull(self):
+        seg = self
+        while seg is not None:
+            hull = seg.hull
+            seg = seg.prev
+
+        return hull
+
     def get_right_end(self):
+        seg = self
         while seg is not None:
             right = seg.right
             seg = seg.next
@@ -321,7 +332,6 @@ class Population:
                 correction += 1
             else:
                 break
-        print(correction)
         self.hulls_left[label][hull] -= correction
 
     def add_hull(self, label, hull):

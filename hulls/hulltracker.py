@@ -1,4 +1,5 @@
 import bintrees
+import math
 import msprime
 import numpy as np
 import random
@@ -159,7 +160,7 @@ class Simulator:
                     self.set_segment_mass(seg)
                     right_end = seg.right
                     seg = seg.next
-                new_hull = self._alloc_hull(left_end, right_end, ancestor_node)
+                new_hull = self.alloc_hull(left_end, right_end, ancestor_node)
                 self.P[pop].hulls_left[label][new_hull] = -1
 
         # initialise the correct coalesceable pairs count
@@ -209,12 +210,14 @@ class Simulator:
     def change_migration_matrix_element(self, pop_i, pop_j, rate):
         self.migration_matrix[pop_i][pop_j] = rate
 
-    def _alloc_hull(self, left, right, ancestor_node):
+    def alloc_hull(self, left, right, ancestor_node):
         hull = self.hull_stack.pop()
         hull.left = int(left)
         hull.right = int(right) + self.hull_offset
         hull.ancestor_node = ancestor_node
-
+        print(ancestor_node.prev)
+        assert ancestor_node.prev is None
+        ancestor_node.hull = hull
         return hull
 
     def alloc_segment(
@@ -490,7 +493,7 @@ class Simulator:
                     self.wiuf_gene_conversion_left_event(0)
                 elif min_time == t_ca:
                     event = "CA"
-                    self.common_ancestor_event(ca_population, 0)
+                    self.common_ancestor_event(lhs_hullca_population, 0)
                     if self.P[ca_population].get_num_ancestors() == 0:
                         non_empty_pops.remove(ca_population)
                 else:
@@ -602,6 +605,7 @@ class Simulator:
         bp = rate_map.mass_to_position(bp_mass)
         if self.discrete_genome:
             bp = math.floor(bp)
+        print("segment:", y, "breakpoint:", bp)
         return y, bp
 
     def hudson_recombination_event(self, label, return_heads=False):
@@ -641,18 +645,25 @@ class Simulator:
             alpha = y
             lhs_tail = x
         # modify original hull
+        lhs_hull = lhs_tail.get_hull()
+        rhs_right = lhs_hull.right
         lhs_hull.right = lhs_tail.right + self.hull_offset
-        # only lhs_hulls.right rank is affected
+        # lhs_hulls.right rank is affected + lineage starting off between
+        # hull.left and breakpoint
+        max_hull = self.P[alpha.population].hulls_left[label].max_key()
+        curr_hull = lhs_hull
+        while curr_hull < max_hull:
+            curr_hull = self.P[alpha.population].hulls_left[label].succ_key(curr_hull)
+            if curr_hull.left >= rhs_right:
+                break
+            if curr_hull.left >= lhs_hull.right:
+                self.P[alpha.population].hulls_left[label][curr_hull] -= 1
         self.P[alpha.population].hulls_right_rank[label].increment(
             lhs_hull.right + 1, 1
         )
         self.set_segment_mass(alpha)
         # create hull for alpha
-        curr_segment = alpha
-        while curr_segment is not None:
-            right = curr_segment.right
-            curr_segment = curr_segment.next
-        alpha_hull = self._alloc_hull(alpha.left, right, alpha)
+        alpha_hull = self.alloc_hull(alpha.left, rhs_right - self.hull_offset, alpha)
         # decrement for removal of old hull, however, will be undone by add()
         self.P[alpha.population].hulls_right_rank[label].increment(
             alpha_hull.right + 1, -1
@@ -1004,7 +1015,7 @@ class Simulator:
             if alpha is not None:
                 if z is None:
                     # we do not know yet where the hull will end.
-                    hull = self._alloc_hull(alpha.left, alpha.right, alpha)
+                    hull = self.alloc_hull(alpha.left, alpha.right, alpha)
                     pop.add(alpha, label, None)
                 else:
                     if (coalescence and not self.coalescing_segments_only) or (
@@ -1034,9 +1045,7 @@ class Simulator:
 
         # update right endpoint hull
         # surely this can be improved upon
-        while z is not None:
-            right = z.right
-            z = z.next
+        right = z.get_right_end()
         hull.right = int(right) + self.hull_offset
         pop.add_hull(label, hull)
 

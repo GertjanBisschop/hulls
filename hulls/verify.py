@@ -103,7 +103,7 @@ def verify_hulls(sim):
                 # check if overlap
                 count += intersect_lineages(a, b)
             avl_pairs = pop.get_num_pairs(label)
-
+            print("true count:", count, "avl_count:", avl_pairs)
             assert count == avl_pairs
 
 

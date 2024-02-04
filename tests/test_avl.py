@@ -99,8 +99,8 @@ class TestAVL:
         old_state = copy.deepcopy(sim.P[0].hulls_left[0])
         left = 45
         right = 65
-        seg_index = -1
-        new_hull = sim._alloc_hull(left, right, seg_index)
+        seg_index = sim.alloc_segment(left, right, -1, pop)
+        new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
         assert sim.P[0].hulls_left[0][new_hull] == 4
         # remove this hull again
@@ -112,7 +112,7 @@ class TestAVL:
         # add in new hull
         left = 20
         right = 60
-        new_hull = sim._alloc_hull(left, right, seg_index)
+        new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
         assert sim.P[0].hulls_left[0][new_hull] == 2
         # remove this hull again
@@ -125,38 +125,47 @@ class TestAVL:
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
-        print('start state')
-        print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        #print('start state')
+        #print(sim.P[0]._ancestors[0])
+        #print(sim.P[0].hulls_left[0])
         self.t = 3.0
         pop = 0
         label= 0
         random_pair = np.array([98, 96], dtype=np.int64)
         sim.common_ancestor_event(pop, label, random_pair)
-        print('after coalescence event')
-        print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        #print('after coalescence event')
+        #print(sim.P[0]._ancestors[0])
+        #print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
 
     def test_random_coalescence_event(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
-        print('starting state')
-        print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        #print('starting state')
+        #print(sim.P[0]._ancestors[0])
+        #print(sim.P[0].hulls_left[0])
         self.t = 3.0
         pop = 0
         label= 0
         sim.common_ancestor_event(pop, label)
-        print('after coalescence event')
-        print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        #print('after coalescence event')
+        #print(sim.P[0]._ancestors[0])
+        #print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
         verify.verify(sim)
 
     def test_recombination(self, pre_defined_tables):
-        pass
+        tables = pre_defined_tables
+        sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
+        label = 0
+        #print(sim.P[0]._ancestors[0])
+        #print(sim.P[0].hulls_left[0])
+        for _ in range(10):
+            sim.hudson_recombination_event(label)
+            #print(sim.P[0]._ancestors[0])
+            #print(sim.P[0].hulls_left[0])
+            verify.verify_hulls(sim)
 
 
 

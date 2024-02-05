@@ -1,7 +1,9 @@
 import bintrees
 import itertools
+import math
 
 import hulls.algorithm as alg
+import hulls.hulltracker as hulltracker
 
 
 class OverlapCounter:
@@ -83,6 +85,15 @@ def intersect_lineages(a, b):
 
     return 0
 
+def intersect_hulls(a, b):
+    return a.left < b.right and b.left < a.right
+
+
+def make_hull(a):
+    hull = hulltracker.Hull(-1)
+    hull.left = a.get_left_end()
+    hull.right = a.get_right_end()
+    return hull
 
 def verify_hulls(sim):
     for pop in sim.P:
@@ -100,8 +111,10 @@ def verify_hulls(sim):
             # verify counts in avl tree
             count = 0
             for a, b in itertools.combinations(pop._ancestors[label], 2):
-                # check if overlap
-                count += intersect_lineages(a, b)
+                # make_hulls:
+                a_hull = make_hull(a)
+                b_hull = make_hull(b)
+                count += intersect_hulls(a_hull, b_hull)
             avl_pairs = pop.get_num_pairs(label)
             print("true count:", count, "avl_count:", avl_pairs)
             assert count == avl_pairs
@@ -204,6 +217,7 @@ def verify(sim):
     """
     verify_segments(sim)
     verify_overlaps(sim)
+    verify_hulls(sim)
     for label in range(sim.num_labels):
         if sim.recomb_mass_index is None:
             assert sim.recomb_map.total_mass == 0

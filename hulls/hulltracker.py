@@ -6,7 +6,7 @@ import random
 import tskit
 
 import hulls.algorithm as alg
-
+import hulls.verify as verify
 
 class Hull:
     def __init__(self, index):
@@ -213,9 +213,8 @@ class Simulator:
     def alloc_hull(self, left, right, ancestor_node):
         hull = self.hull_stack.pop()
         hull.left = int(left)
-        hull.right = int(right) + self.hull_offset
+        hull.right = min(int(right) + self.hull_offset, self.L)
         hull.ancestor_node = ancestor_node
-        print(ancestor_node.prev)
         assert ancestor_node.prev is None
         ancestor_node.hull = hull
         return hull
@@ -359,7 +358,7 @@ class Simulator:
         return self.tables.tree_sequence()
 
     def simulate(self, end_time):
-        # self.verify()
+        verify.verify(sim)
         ret = self.simulate_smc(end_time)
 
         if ret == 2:  # _msprime.EXIT_MAX_TIME:
@@ -423,7 +422,7 @@ class Simulator:
 
         # only worried about label 0 below
         while self.assert_stop_condition():
-            self.verify()
+            verify.verify(sim)
             # self.print_state()
             re_rate = self.get_total_recombination_rate(label=0)
             t_re = infinity
@@ -706,7 +705,7 @@ class Simulator:
         # generate tract_length
         tl = self.generate_gc_tract_length()
         assert tl > 0
-        right_breakpoint = left_breakpoint + tl
+        right_breakpoint = min(left_breakpoint + tl, self.L)
         if y.left >= right_breakpoint:
             #                  y
             # ...  |   |   ========== ...
@@ -802,15 +801,17 @@ class Simulator:
         #  |  ========== ... ===== |
         # lbp                     rbp
         # When y and z are the head and tail of the segment chains, then
-        # this GC event does nothing. This logic takes are of this situation.
+        # this GC event does nothing. This logic takes care of this situation.
         new_individual_head = None
         if insert_alpha:
             new_individual_head = alpha
         elif head is not None:
             new_individual_head = head
         if new_individual_head is not None:
+            right = right_breakpoint
+            hull = self.alloc_hull(left_breakpoint, right, alpha)
             self.P[new_individual_head.population].add(
-                new_individual_head, new_individual_head.label
+                new_individual_head, new_individual_head.label, hull
             )
 
     def wiuf_gene_conversion_left_event(self, label):
@@ -839,6 +840,7 @@ class Simulator:
 
         self.num_gc_events += 1
         x = y.prev
+        lhs_hull = y.get_hull()
         if y.left < bp:
             #  x          y
             # =====   =====|====
@@ -856,6 +858,7 @@ class Simulator:
             y.next = None
             y.right = bp
             self.set_segment_mass(y)
+            right = y.right
         else:
             #  x          y
             # ===== |  =========
@@ -869,9 +872,29 @@ class Simulator:
             x.next = None
             y.prev = None
             alpha = y
+            right = x.right
         self.set_segment_mass(alpha)
-        assert alpha.prev is None
-        self.P[alpha.population].add(alpha, label)
+        # logic is identical to the lhs recombination event: carve out 
+        rhs_right = lhs_hull.right 
+        lhs_hull.right = int(right + self.hull_offset)
+        max_hull = self.P[alpha.population].hulls_left[label].max_key()
+        curr_hull = lhs_hull
+        while curr_hull < max_hull:
+            curr_hull = self.P[alpha.population].hulls_left[label].succ_key(curr_hull)
+            if curr_hull.left >= rhs_right:
+                break
+            if curr_hull.left >= lhs_hull.right:
+                self.P[alpha.population].hulls_left[label][curr_hull] -= 1
+        # decrement old rhs
+        self.P[alpha.population].hulls_right_rank[label].increment(
+            rhs_right + 1, -1
+        )
+        self.P[alpha.population].hulls_right_rank[label].increment(
+            lhs_hull.right + 1, 1
+        )
+        # rhs
+        hull = self.alloc_hull(alpha.left, rhs_right, alpha)
+        self.P[alpha.population].add(alpha, label, hull)
 
     def store_additional_nodes_edges(self, flag, new_node_id, z):
         if self.additional_nodes.value & flag > 0:
@@ -1046,7 +1069,7 @@ class Simulator:
         # update right endpoint hull
         # surely this can be improved upon
         right = z.get_right_end()
-        hull.right = int(right) + self.hull_offset
+        hull.right = min(int(right) + self.hull_offset, self.L)
         pop.add_hull(label, hull)
 
     def print_state(self):

@@ -346,9 +346,7 @@ class Population:
         self.hulls_left[label][hull] = count
         # correction is needed because the rank implementation in the Python version
         # assumes that new hulls are added below hulls with the same starting point.
-        print("pre_correction", self.hulls_left[label][hull])
         self.add_hull_count_correction(label, hull)
-        print("post_correction", self.hulls_left[label][hull])
         # self.num_pairs[label] += count - correction
         # Adjust counts for existing hulls in the avl tree
         self.increment_avl(label, hull, 1)

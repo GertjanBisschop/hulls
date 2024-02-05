@@ -166,7 +166,48 @@ class TestAVL:
             #print(sim.P[0]._ancestors[0])
             #print(sim.P[0].hulls_left[0])
             verify.verify_hulls(sim)
+            verify.verify(sim)
 
+    def test_gene_conversion_gci(self, pre_defined_tables):
+        tables = pre_defined_tables
+        sim = tracker.Simulator(
+            initial_state=tables, 
+            recombination_rate=0.1,
+            gene_conversion_rate=0.1,
+            gene_conversion_length=10,
+            )
+        label = 0
+        # print(sim.P[0]._ancestors[0])
+        # print(sim.P[0].hulls_left[0])
+        sim.wiuf_gene_conversion_within_event(label)
+        # print(sim.P[0]._ancestors[0])
+        # print(sim.P[0].hulls_left[0])
+        verify.verify_hulls(sim)
+        verify.verify(sim)
+
+    def test_gene_conversion_gcl(self, pre_defined_tables):
+        tables = pre_defined_tables
+        sim = tracker.Simulator(
+            initial_state=tables, 
+            recombination_rate=0.1,
+            gene_conversion_rate=0.1,
+            gene_conversion_length=10,
+        )
+        label = 0
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        for _ in range(10):
+            sim.wiuf_gene_conversion_left_event(label)
+            print(sim.P[0]._ancestors[0])
+            print(sim.P[0].hulls_left[0])
+            verify.verify_hulls(sim)
+            verify.verify(sim)
+
+class TestSim:
+    def no_test_smc(self):
+        tables = make_initial_state({'A':4}, 100)
+        sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
+        sim.simulate()
 
 
 def make_initial_state(sample_configuration, sequence_length):

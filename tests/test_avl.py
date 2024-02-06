@@ -256,22 +256,44 @@ class TestAVL:
             verify.verify_hulls(sim)
             verify.verify(sim)
 
-    def no_test_smck(self):
+    @pytest.mark.parametrize(
+        "seed, hull_offset", [(5213366, 3), (3324, 7), (7997543, 5)]
+    )
+    def test_smck(self, pre_defined_tables, seed, hull_offset):
         tables = pre_defined_tables
-        sim = tracker.Simulator(initial_state=tables, hull_offset=3)
+        sim = tracker.Simulator(
+            initial_state=tables,
+            hull_offset=hull_offset,
+            recombination_rate=0.1,
+            random_seed=seed,
+        )
         verify.verify_hulls(sim)
         self.t = 3.0
         pop = 0
         label = 0
         sim.common_ancestor_event(pop, label)
+        verify.verify(sim)
         sim.hudson_recombination_event(label)
+        verify.verify(sim)
 
 
 class TestSim:
-    def no_test_smc(self):
-        tables = make_initial_state({"A": 4}, 100)
-        sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
-        sim.simulate()
+    def test_smc(self):
+        seed = random.randrange(sys.maxsize)
+        print("Seed was:", seed)
+        tables = make_initial_state([4], 100)
+        sim = tracker.Simulator(
+            initial_state=tables,
+            hull_offset=0,
+            recombination_rate=1e-5,
+            random_seed=seed,
+        )
+        try:
+            sim.simulate()
+        except:
+            print(sim.P[0]._ancestors[0])
+            print(sim.P[0].hulls_left[0])
+        assert sim.num_re_events > 0
 
 
 def make_initial_state(sample_configuration, sequence_length):
@@ -280,3 +302,5 @@ def make_initial_state(sample_configuration, sequence_length):
         tables.populations.add_row()
         for _ in range(sample_count):
             tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0, population=pop_id)
+
+    return tables

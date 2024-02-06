@@ -3,6 +3,7 @@ import math
 import msprime
 import numpy as np
 import random
+import sys
 import tskit
 
 import hulls.algorithm as alg
@@ -30,7 +31,7 @@ class Simulator:
         self,
         *,
         initial_state=None,
-        migration_map=None,
+        migration_matrix=None,
         max_segments=100,
         recombination_rate=0.0,
         gene_conversion_rate=0.0,
@@ -42,6 +43,9 @@ class Simulator:
         random_seed=None,
     ):
         N = 1  # num pops
+        if migration_matrix is None:
+            migration_matrix = np.zeros((N, N))
+        self.migration_matrix = migration_matrix
         self.num_labels = 1
         self.num_populations = N
         population_sizes = [10_000 for _ in range(self.num_populations)]
@@ -101,6 +105,7 @@ class Simulator:
             pop.set_start_size(population_sizes[pop.id])
             pop.set_growth_rate(population_growth_rates[pop.id], 0)
         self.edge_buffer = []
+        self.modifier_events = [(sys.float_info.max, None, None)]
 
         self.initialise(initial_state)
 
@@ -360,8 +365,10 @@ class Simulator:
         self.tables.nodes.individual = ind_col
         return self.tables.tree_sequence()
 
-    def simulate(self, end_time):
-        verify.verify(sim)
+    def simulate(self, end_time=None):
+        if end_time is None:
+            end_time = np.inf
+        verify.verify(self)
         ret = self.simulate_smc(end_time)
 
         if ret == 2:  # _msprime.EXIT_MAX_TIME:
@@ -425,7 +432,7 @@ class Simulator:
 
         # only worried about label 0 below
         while self.assert_stop_condition():
-            verify.verify(sim)
+            verify.verify(self)
             # self.print_state()
             re_rate = self.get_total_recombination_rate(label=0)
             t_re = infinity
@@ -495,7 +502,7 @@ class Simulator:
                     self.wiuf_gene_conversion_left_event(0)
                 elif min_time == t_ca:
                     event = "CA"
-                    self.common_ancestor_event(lhs_hullca_population, 0)
+                    self.common_ancestor_event(ca_population, 0)
                     if self.P[ca_population].get_num_ancestors() == 0:
                         non_empty_pops.remove(ca_population)
                 else:
@@ -1089,9 +1096,10 @@ class Simulator:
 
         # update right endpoint hull
         # surely this can be improved upon
-        right = z.get_right_end()
-        hull.right = min(int(right) + self.hull_offset, self.L)
-        pop.add_hull(label, hull)
+        if z is not None:
+            right = z.get_right_end()
+            hull.right = min(int(right) + self.hull_offset, self.L)
+            pop.add_hull(label, hull)
 
     def print_state(self):
         for pop in self.P:

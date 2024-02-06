@@ -244,8 +244,9 @@ class Population:
         occurs within this population.
         """
         ret = sys.float_info.max
-        u = self.get_num_pairs()
-        if u > 1:
+        k = self.get_num_pairs()
+        if k > 0:
+            u = random.expovariate(k / 2)  # divide by 2???
             if self.growth_rate == 0:
                 ret = self.start_size * u
             else:

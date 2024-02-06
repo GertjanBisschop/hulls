@@ -114,7 +114,7 @@ class Segment:
         self.hull = None
 
     def __repr__(self):
-        return repr((self.left, self.right, self.node))
+        return repr((self.left, self.right, self.node, self.index))
 
     @staticmethod
     def show_chain(seg):
@@ -155,6 +155,14 @@ class Segment:
             seg = seg.next
 
         return right
+
+    def get_left_index(self):
+        seg = self
+        while seg is not None:
+            index = seg.index
+            seg = seg.prev
+
+        return index
 
 
 class Population:

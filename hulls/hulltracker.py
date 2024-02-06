@@ -8,6 +8,7 @@ import tskit
 import hulls.algorithm as alg
 import hulls.verify as verify
 
+
 class Hull:
     def __init__(self, index):
         self.left = None
@@ -38,6 +39,7 @@ class Simulator:
         hull_offset=0,
         coalescing_segments_only=True,
         additional_nodes=None,
+        random_seed=None,
     ):
         N = 1  # num pops
         self.num_labels = 1
@@ -50,6 +52,7 @@ class Simulator:
             initial_state = initial_state.dump_tables()
         self.tables = initial_state
         self.L = int(initial_state.sequence_length)
+        self.rng = random.Random(random_seed)
 
         self.recomb_map = alg.RateMap([0, self.L], [recombination_rate, 0])
         self.gc_map = alg.RateMap([0, self.L], [gene_conversion_rate, 0])
@@ -427,18 +430,18 @@ class Simulator:
             re_rate = self.get_total_recombination_rate(label=0)
             t_re = infinity
             if re_rate > 0:
-                t_re = random.expovariate(re_rate)
+                t_re = self.rng.expovariate(re_rate)
 
             # Gene conversion can occur within segments ..
             gc_rate = self.get_total_gc_rate(label=0)
             t_gcin = infinity
             if gc_rate > 0:
-                t_gcin = random.expovariate(gc_rate)
+                t_gcin = self.rng.expovariate(gc_rate)
             # ... or to the left of the first segment.
             gc_left_rate = self.get_total_gc_left_rate(label=0)
             t_gc_left = infinity
             if gc_left_rate > 0:
-                t_gc_left = random.expovariate(gc_left_rate)
+                t_gc_left = self.rng.expovariate(gc_left_rate)
 
             # Common ancestor events occur within demes.
             t_ca = infinity
@@ -458,7 +461,7 @@ class Simulator:
                 for k in potential_destinations[j]:
                     rate = source_size * self.migration_matrix[j][k]
                     assert rate > 0
-                    t = random.expovariate(rate)
+                    t = self.rng.expovariate(rate)
                     if t < t_mig:
                         t_mig = t
                         mig_source = j
@@ -534,7 +537,7 @@ class Simulator:
         label = 0
         source = self.P[j]
         dest = self.P[k]
-        index = random.randint(0, source.get_num_ancestors(label) - 1)
+        index = self.rng.randint(0, source.get_num_ancestors(label) - 1)
         x = source.remove(index, label)
         dest.add(x, label)
         if self.additional_nodes.value & msprime.NODE_IS_MIG_EVENT > 0:
@@ -594,9 +597,26 @@ class Simulator:
                     mass_index[segment.label].set_value(segment.index, mass)
             segment = segment.next
 
+    def reset_hull_right(self, hull, old_right, new_right, pop, label):
+        # when resetting the hull.right of a pre-existing hull we need to
+        # decrement count of all lineages starting off between hull.left and bp
+        avl = self.P[pop].hulls_left[label]
+        max_hull = avl.max_key()
+        curr_hull = hull
+        while curr_hull < max_hull:
+            curr_hull = avl.succ_key(curr_hull)
+            if curr_hull.left >= old_right:
+                break
+            if curr_hull.left >= new_right:
+                avl[curr_hull] -= 1
+
+        # adjust rank of hull.right
+        self.P[pop].hulls_right_rank[label].increment(int(old_right) + 1, -1)
+        self.P[pop].hulls_right_rank[label].increment(int(new_right) + 1, 1)
+
     def choose_breakpoint(self, mass_index, rate_map):
         assert mass_index.get_total() > 0
-        random_mass = random.uniform(0, mass_index.get_total())
+        random_mass = self.rng.uniform(0, mass_index.get_total())
         y = self.segments[mass_index.find(random_mass)]
         y_cumulative_mass = mass_index.get_cumulative_sum(y.index)
         y_right_mass = rate_map.position_to_mass(y.right)
@@ -604,15 +624,21 @@ class Simulator:
         bp = rate_map.mass_to_position(bp_mass)
         if self.discrete_genome:
             bp = math.floor(bp)
-        print("segment:", y, "breakpoint:", bp)
+        # print("segment:", y, "breakpoint:", bp)
+        y_index = y.get_left_index()
+        # print("segment chain left", y.get_left_end(), y.get_left_index())
+        # print(alg.Segment.show_chain(self.segments[y_index]))
         return y, bp
 
-    def hudson_recombination_event(self, label, return_heads=False):
+    def hudson_recombination_event(self, label, return_heads=False, y=None, bp=None):
         """
         Implements a recombination event.
         """
         self.num_re_events += 1
-        y, bp = self.choose_breakpoint(self.recomb_mass_index[label], self.recomb_map)
+        if y is None or bp is None:
+            y, bp = self.choose_breakpoint(
+                self.recomb_mass_index[label], self.recomb_map
+            )
         x = y.prev
         if y.left < bp:
             #   x         y
@@ -643,30 +669,17 @@ class Simulator:
             y.prev = None
             alpha = y
             lhs_tail = x
+
         # modify original hull
+        pop = alpha.population
         lhs_hull = lhs_tail.get_hull()
         rhs_right = lhs_hull.right
         lhs_hull.right = lhs_tail.right + self.hull_offset
-        # lhs_hulls.right rank is affected + lineage starting off between
-        # hull.left and breakpoint
-        max_hull = self.P[alpha.population].hulls_left[label].max_key()
-        curr_hull = lhs_hull
-        while curr_hull < max_hull:
-            curr_hull = self.P[alpha.population].hulls_left[label].succ_key(curr_hull)
-            if curr_hull.left >= rhs_right:
-                break
-            if curr_hull.left >= lhs_hull.right:
-                self.P[alpha.population].hulls_left[label][curr_hull] -= 1
-        self.P[alpha.population].hulls_right_rank[label].increment(
-            lhs_hull.right + 1, 1
-        )
+        self.reset_hull_right(lhs_hull, rhs_right, lhs_hull.right, pop, label)
+        # logic for alpha
         self.set_segment_mass(alpha)
         # create hull for alpha
         alpha_hull = self.alloc_hull(alpha.left, rhs_right - self.hull_offset, alpha)
-        # decrement for removal of old hull, however, will be undone by add()
-        self.P[alpha.population].hulls_right_rank[label].increment(
-            alpha_hull.right + 1, -1
-        )
         self.P[alpha.population].add(alpha, label, alpha_hull)
         if self.additional_nodes.value & msprime.NODE_IS_RE_EVENT > 0:
             self.store_node(lhs_tail.population, flags=msprime.NODE_IS_RE_EVENT)
@@ -684,13 +697,16 @@ class Simulator:
 
     def generate_gc_tract_length(self):
         # generate tract length
+        np_rng = np.random.default_rng(self.rng.randint(1, 2**16))
         if self.discrete_genome:
-            tl = np.random.geometric(1 / self.tract_length)
+            tl = np_rng.geometric(1 / self.tract_length)
         else:
-            tl = np.random.exponential(self.tract_length)
+            tl = np_rng.exponential(self.tract_length)
         return tl
 
-    def wiuf_gene_conversion_within_event(self, label):
+    def wiuf_gene_conversion_within_event(
+        self, label, y=None, left_breakpoint=None, tl=None
+    ):
         """
         Implements a gene conversion event that starts within a segment
         """
@@ -698,12 +714,15 @@ class Simulator:
         # we're not trying to simulate the full GC process with this
         # one event anymore. Look into what bits can be dropped now
         # that we're simulating gc_left separately again.
-        y, left_breakpoint = self.choose_breakpoint(
-            self.gc_mass_index[label], self.gc_map
-        )
+        if y is None or left_breakpoint is None:
+            y, left_breakpoint = self.choose_breakpoint(
+                self.gc_mass_index[label], self.gc_map
+            )
         x = y.prev
         # generate tract_length
-        tl = self.generate_gc_tract_length()
+        if tl is None:
+            tl = int(self.generate_gc_tract_length())
+            # print('tract length:', tl)
         assert tl > 0
         right_breakpoint = min(left_breakpoint + tl, self.L)
         if y.left >= right_breakpoint:
@@ -712,7 +731,9 @@ class Simulator:
             #     lbp rbp
             return None
         self.num_gc_events += 1
-
+        pop = y.population
+        hull = y.get_hull()
+        reset_right = -1
         # Process left break
         insert_alpha = True
         if left_breakpoint <= y.left:
@@ -725,11 +746,13 @@ class Simulator:
             # =====         α
             #           ==========
             if x is None:
+                raise NotImplementedError
                 # In this case we *don't* insert alpha because it is already
                 # the head of a segment chain
                 insert_alpha = False
             else:
                 x.next = None
+                reset_right = x.right
             y.prev = None
             alpha = y
             tail = x
@@ -751,11 +774,14 @@ class Simulator:
             y.right = left_breakpoint
             self.set_segment_mass(y)
             tail = y
+            reset_right = left_breakpoint
         self.set_segment_mass(alpha)
 
         # Find the segment z that the right breakpoint falls in
         z = alpha
+        hull_left = z.left
         while z is not None and right_breakpoint >= z.right:
+            hull_right = z.right
             z = z.next
 
         head = None
@@ -779,6 +805,7 @@ class Simulator:
                 z.right = right_breakpoint
                 z.next = None
                 self.set_segment_mass(z)
+                hull_right = right_breakpoint
             else:
                 #   tail             z
                 # ======
@@ -796,6 +823,11 @@ class Simulator:
                 tail.next = head
             head.prev = tail
             self.set_segment_mass(head)
+        else:
+            # rbp lies beyond end of segment chain
+            # regular recombination logic applies
+            if insert_alpha:
+                self.reset_hull_right(hull, hull_right, reset_right, pop, label)
 
         #        y            z
         #  |  ========== ... ===== |
@@ -808,8 +840,8 @@ class Simulator:
         elif head is not None:
             new_individual_head = head
         if new_individual_head is not None:
-            right = right_breakpoint
-            hull = self.alloc_hull(left_breakpoint, right, alpha)
+            assert hull_left < hull_right
+            hull = self.alloc_hull(hull_left, hull_right, new_individual_head)
             self.P[new_individual_head.population].add(
                 new_individual_head, new_individual_head.label, hull
             )
@@ -818,7 +850,7 @@ class Simulator:
         """
         Implements a gene conversion event that started left of a first segment.
         """
-        random_gc_left = random.uniform(0, self.get_total_gc_left(label))
+        random_gc_left = self.rng.uniform(0, self.get_total_gc_left(label))
         # Get segment where gene conversion starts from left
         y = self.find_cleft_individual(label, random_gc_left)
         assert y is not None
@@ -840,6 +872,7 @@ class Simulator:
 
         self.num_gc_events += 1
         x = y.prev
+        pop = y.population
         lhs_hull = y.get_hull()
         if y.left < bp:
             #  x          y
@@ -873,26 +906,14 @@ class Simulator:
             y.prev = None
             alpha = y
             right = x.right
-        self.set_segment_mass(alpha)
-        # logic is identical to the lhs recombination event: carve out 
-        rhs_right = lhs_hull.right 
+        # lhs
+        # logic is identical to the lhs recombination event
+        rhs_right = lhs_hull.right
         lhs_hull.right = int(right + self.hull_offset)
-        max_hull = self.P[alpha.population].hulls_left[label].max_key()
-        curr_hull = lhs_hull
-        while curr_hull < max_hull:
-            curr_hull = self.P[alpha.population].hulls_left[label].succ_key(curr_hull)
-            if curr_hull.left >= rhs_right:
-                break
-            if curr_hull.left >= lhs_hull.right:
-                self.P[alpha.population].hulls_left[label][curr_hull] -= 1
-        # decrement old rhs
-        self.P[alpha.population].hulls_right_rank[label].increment(
-            rhs_right + 1, -1
-        )
-        self.P[alpha.population].hulls_right_rank[label].increment(
-            lhs_hull.right + 1, 1
-        )
+        self.reset_hull_right(lhs_hull, rhs_right, lhs_hull.right, pop, label)
+
         # rhs
+        self.set_segment_mass(alpha)
         hull = self.alloc_hull(alpha.left, rhs_right, alpha)
         self.P[alpha.population].add(alpha, label, hull)
 
@@ -938,15 +959,15 @@ class Simulator:
         if random_pair is None:
             random_pair = -np.ones(2, dtype=np.int64)
             num_pairs = pop.get_num_pairs()
-            random_count = random.randint(0, num_pairs - 1)
+            random_count = self.rng.randint(0, num_pairs - 1)
             pop.get_random_pair(random_pair, random_count, label)
         hull_i_ptr, hull_j_ptr = random_pair
         hull_i = self.hulls[hull_i_ptr]
         hull_j = self.hulls[hull_j_ptr]
         x = hull_i.ancestor_node
         y = hull_j.ancestor_node
-        print(f"random pair: {random_pair}")
-        print(f"coalescing:{x} + {y}")
+        # print(f"random pair: {random_pair}")
+        # print(f"coalescing:{x} + {y}")
         pop.remove(x, label, hull_i)
         pop.remove(y, label, hull_j)
         self.free_hull(hull_i)

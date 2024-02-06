@@ -2,12 +2,15 @@ import copy
 import math
 import numpy as np
 import pytest
+import random
+import sys
 import tskit
 
 
 import hulls.hulltracker as tracker
 import hulls.verify as verify
 import hulls.algorithm as alg
+
 
 class TestAVL:
     @pytest.fixture(scope="class")
@@ -61,7 +64,6 @@ class TestAVL:
         )
         pairs = sim.P[0].get_num_pairs()
         assert pairs == math.comb(10, 2)
-
 
     def test_setup_simple(self, pre_defined_tables):
         tables = pre_defined_tables
@@ -125,73 +127,124 @@ class TestAVL:
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
-        #print('start state')
-        #print(sim.P[0]._ancestors[0])
-        #print(sim.P[0].hulls_left[0])
+        # print('start state')
+        # print(sim.P[0]._ancestors[0])
+        # print(sim.P[0].hulls_left[0])
         self.t = 3.0
         pop = 0
-        label= 0
+        label = 0
         random_pair = np.array([98, 96], dtype=np.int64)
         sim.common_ancestor_event(pop, label, random_pair)
-        #print('after coalescence event')
-        #print(sim.P[0]._ancestors[0])
-        #print(sim.P[0].hulls_left[0])
+        # print('after coalescence event')
+        # print(sim.P[0]._ancestors[0])
+        # print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
 
     def test_random_coalescence_event(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
-        #print('starting state')
-        #print(sim.P[0]._ancestors[0])
-        #print(sim.P[0].hulls_left[0])
+        # print('starting state')
+        # print(sim.P[0]._ancestors[0])
+        # print(sim.P[0].hulls_left[0])
         self.t = 3.0
         pop = 0
-        label= 0
+        label = 0
         sim.common_ancestor_event(pop, label)
-        #print('after coalescence event')
-        #print(sim.P[0]._ancestors[0])
-        #print(sim.P[0].hulls_left[0])
+        # print('after coalescence event')
+        # print(sim.P[0]._ancestors[0])
+        # print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
         verify.verify(sim)
 
-    def test_recombination(self, pre_defined_tables):
+    def test_fixed_recombination(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
         label = 0
-        #print(sim.P[0]._ancestors[0])
-        #print(sim.P[0].hulls_left[0])
-        for _ in range(10):
-            sim.hudson_recombination_event(label)
-            #print(sim.P[0]._ancestors[0])
-            #print(sim.P[0].hulls_left[0])
-            verify.verify_hulls(sim)
-            verify.verify(sim)
-
-    def test_gene_conversion_gci(self, pre_defined_tables):
-        tables = pre_defined_tables
-        sim = tracker.Simulator(
-            initial_state=tables, 
-            recombination_rate=0.1,
-            gene_conversion_rate=0.1,
-            gene_conversion_length=10,
-            )
-        label = 0
-        # print(sim.P[0]._ancestors[0])
-        # print(sim.P[0].hulls_left[0])
-        sim.wiuf_gene_conversion_within_event(label)
-        # print(sim.P[0]._ancestors[0])
-        # print(sim.P[0].hulls_left[0])
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        y = sim.segments[98]
+        sim.hudson_recombination_event(label, y=y, bp=16)
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
         verify.verify(sim)
 
-    def test_gene_conversion_gcl(self, pre_defined_tables):
+    @pytest.mark.parametrize("seed", [(489), (49977), (974533)])
+    def test_recombination(self, pre_defined_tables, seed):
+        # seed = random.randrange(sys.maxsize)
+        # print("Seed was:", seed)
         tables = pre_defined_tables
         sim = tracker.Simulator(
-            initial_state=tables, 
+            initial_state=tables, recombination_rate=0.1, random_seed=seed
+        )
+        label = 0
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        for i in range(10):
+            sim.hudson_recombination_event(label)
+            print(i)
+            print(sim.P[0]._ancestors[0])
+            print(sim.P[0].hulls_left[0])
+            verify.verify_hulls(sim)
+            verify.verify(sim)
+
+    @pytest.mark.parametrize("y, lbp, tl", [(98, 15, 10), (94, 74, 13)])
+    def test_gene_conversion_gci_fixed(self, pre_defined_tables, y, lbp, tl):
+        tables = pre_defined_tables
+        sim = tracker.Simulator(
+            initial_state=tables,
             recombination_rate=0.1,
             gene_conversion_rate=0.1,
             gene_conversion_length=10,
+        )
+        label = 0
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        y = sim.segments[y]
+        print("segment", y)
+        # lbp = 15
+        # tl = 10
+        sim.wiuf_gene_conversion_within_event(label, y=y, left_breakpoint=lbp, tl=tl)
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        verify.verify_hulls(sim)
+        verify.verify(sim)
+
+    @pytest.mark.parametrize("seed", [(5024690859102969185), (999), (697456)])
+    def test_gene_conversion_gci(self, pre_defined_tables, seed):
+        # seed = random.randrange(sys.maxsize)
+        # print("Seed was:", seed)
+        tables = pre_defined_tables
+        sim = tracker.Simulator(
+            initial_state=tables,
+            recombination_rate=0.1,
+            gene_conversion_rate=0.1,
+            gene_conversion_length=10,
+            random_seed=seed,
+        )
+        label = 0
+        print(sim.P[0]._ancestors[0])
+        print(sim.P[0].hulls_left[0])
+        for i in range(10):
+            sim.wiuf_gene_conversion_within_event(label)
+            print(sim.P[0]._ancestors[0])
+            print(sim.P[0].hulls_left[0])
+            verify.verify_hulls(sim)
+            verify.verify(sim)
+            print("-------------")
+
+    @pytest.mark.parametrize("seed", [(646), (77411), (12)])
+    def test_gene_conversion_gcl(self, pre_defined_tables, seed):
+        # seed = random.randrange(sys.maxsize)
+        # print("Seed was:", seed)
+        tables = pre_defined_tables
+        sim = tracker.Simulator(
+            initial_state=tables,
+            recombination_rate=0.1,
+            gene_conversion_rate=0.1,
+            gene_conversion_length=10,
+            random_seed=seed,
         )
         label = 0
         print(sim.P[0]._ancestors[0])
@@ -203,9 +256,20 @@ class TestAVL:
             verify.verify_hulls(sim)
             verify.verify(sim)
 
+    def no_test_smck(self):
+        tables = pre_defined_tables
+        sim = tracker.Simulator(initial_state=tables, hull_offset=3)
+        verify.verify_hulls(sim)
+        self.t = 3.0
+        pop = 0
+        label = 0
+        sim.common_ancestor_event(pop, label)
+        sim.hudson_recombination_event(label)
+
+
 class TestSim:
     def no_test_smc(self):
-        tables = make_initial_state({'A':4}, 100)
+        tables = make_initial_state({"A": 4}, 100)
         sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
         sim.simulate()
 

@@ -85,15 +85,17 @@ def intersect_lineages(a, b):
 
     return 0
 
+
 def intersect_hulls(a, b):
     return a.left < b.right and b.left < a.right
 
 
-def make_hull(a):
+def make_hull(a, offset=0):
     hull = hulltracker.Hull(-1)
     hull.left = a.get_left_end()
-    hull.right = a.get_right_end()
+    hull.right = a.get_right_end() + offset
     return hull
+
 
 def verify_hulls(sim):
     for pop in sim.P:
@@ -112,8 +114,8 @@ def verify_hulls(sim):
             count = 0
             for a, b in itertools.combinations(pop._ancestors[label], 2):
                 # make_hulls:
-                a_hull = make_hull(a)
-                b_hull = make_hull(b)
+                a_hull = make_hull(a, sim.hull_offset)
+                b_hull = make_hull(b, sim.hull_offset)
                 count += intersect_hulls(a_hull, b_hull)
             avl_pairs = pop.get_num_pairs(label)
             print("true count:", count, "avl_count:", avl_pairs)

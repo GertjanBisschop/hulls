@@ -318,6 +318,9 @@ class Population:
         Removes and returns the individual at the specified index.
         """
         # update hull information
+        assert individual.left == individual.get_left_end()
+        print(hull, individual.get_hull())
+        assert individual.get_hull() == hull
         if hull is not None:
             self.remove_hull(label, hull)
         return self._ancestors[label].remove(individual)

@@ -25,6 +25,67 @@ class Hull:
     def __repr__(self):
         return f"{self.left}, {self.right}, {self.index}"
 
+class OrderStatisticsTree:
+
+    def __init__(self):
+        self.avl = bintrees.AVLTree()
+        self.rank = {}
+        self.size = 0
+        self.min = None
+
+    def __len__(self):
+        return self.size
+
+    def __setitem__(self, key, value):
+        self.avl[key] = value
+        first = True
+        rank = 0
+        if self.min != None:
+            if self.min < key:
+                prev_key, rank = self.prev_key(key)
+                rank += 1
+                first = False
+        if first:
+            self.min = key
+        self.rank[key] = rank        
+        self.size += 1
+        self.update_ranks(key, rank)
+
+    def __getitem__(self, key):
+        return self.avl[key], self.rank[key]
+
+    def update_ranks(self, key, rank, increment=1):
+        while rank < self.size - 1:
+            key = self.avl.succ_key(key)
+            self.rank[key] += increment
+            rank += 1
+
+    def pop(self, key):
+        if self.min == key:
+            self.min = self.avl.succ_key(key)
+        rank = self.rank.pop(key)
+        self.update_ranks(key, rank, -1)
+        value = self.avl.pop(key)
+        self.size -= 1
+        return value, rank
+
+    def succ_key(self, key):
+        rank = self.rank[key]
+        if self.rank[key] < self.size - 1:
+            key = self.avl.succ_key(key)
+            rank += 1
+            return key, rank
+        else:
+            return None, None
+
+    def prev_key(self, key):
+        if key == self.min:
+            return None, None
+        else:
+            key = self.avl.prev_key(key)
+            rank = self.rank[key]
+            return key, rank
+
 
 class Simulator:
     def __init__(
@@ -42,7 +103,16 @@ class Simulator:
         additional_nodes=None,
         random_seed=None,
     ):
-        N = 1  # num pops
+        
+        if migration_matrix is None:
+            migration_matrix = np.zeros((1,1))
+        N = migration_matrix.shape[0]
+        assert len(initial_state.populations) == N
+        for j in range(N):
+            assert N == len(migration_matrix[j])
+            assert migration_matrix[j][j] == 0
+        self.migration_matrix = migration_matrix
+        assert gene_conversion_length >= 1
         if migration_matrix is None:
             migration_matrix = np.zeros((N, N))
         self.migration_matrix = migration_matrix
@@ -219,12 +289,15 @@ class Simulator:
         self.migration_matrix[pop_i][pop_j] = rate
 
     def alloc_hull(self, left, right, ancestor_node):
+        alpha = ancestor_node
+        while alpha.prev is not None:
+            alpha = alpha.prev
         hull = self.hull_stack.pop()
         hull.left = int(left)
         hull.right = min(int(right) + self.hull_offset, self.L)
-        hull.ancestor_node = ancestor_node
-        assert ancestor_node.prev is None
-        ancestor_node.hull = hull
+        hull.ancestor_node = alpha
+        assert alpha.prev is None
+        alpha.hull = hull
         return hull
 
     def alloc_segment(
@@ -545,8 +618,10 @@ class Simulator:
         source = self.P[j]
         dest = self.P[k]
         index = self.rng.randint(0, source.get_num_ancestors(label) - 1)
-        x = source.remove(index, label)
-        dest.add(x, label)
+        x = source._ancestors[label][index]
+        hull = x.get_hull()
+        source.remove(x, label, hull)
+        dest.add(x, label, hull)
         if self.additional_nodes.value & msprime.NODE_IS_MIG_EVENT > 0:
             self.store_node(k, flags=msprime.NODE_IS_MIG_EVENT)
             self.store_arg_edges(x)
@@ -1098,6 +1173,7 @@ class Simulator:
         # surely this can be improved upon
         if z is not None:
             right = z.get_right_end()
+            # set seg.hull = None
             hull.right = min(int(right) + self.hull_offset, self.L)
             pop.add_hull(label, hull)
 

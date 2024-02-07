@@ -11,6 +11,34 @@ import hulls.hulltracker as tracker
 import hulls.verify as verify
 import hulls.algorithm as alg
 
+class TestOrderStatisticsTree:
+    def test_simple(self):
+        num_values = 20
+        keys = np.arange(num_values)
+        values = np.random.random(num_values)
+        values.sort()
+        A = tracker.OrderStatisticsTree()
+        for key, value in zip(keys, values):
+            A[key] = value
+        assert A.min == np.min(keys)
+        A[-1] = 0
+        for i in range(num_values):
+            assert A.rank[i] == i + 1
+        value, rank = A.pop(-1)
+        assert value == 0
+        assert rank == 0
+        for i in range(num_values):
+            assert A.rank[i] == i
+        x = np.random.uniform(low=0, high=num_values - 1)
+        A[x] = -1
+        rank = math.floor(x) + 1
+        assert A.rank[x] == rank
+        key = x
+        while key is not None:
+            temp = rank
+            key, rank = A.succ_key(key)
+        assert A.size == num_values + 1
+        assert temp == num_values
 
 class TestAVL:
     @pytest.fixture(scope="class")
@@ -278,9 +306,22 @@ class TestAVL:
 
 
 class TestSim:
-    def test_smc(self):
+    def test_smc_no_rec(self):
         seed = random.randrange(sys.maxsize)
         print("Seed was:", seed)
+        tables = make_initial_state([4], 100)
+        sim = tracker.Simulator(
+            initial_state=tables,
+            hull_offset=0,
+            random_seed=seed,
+        )
+        ts = sim.simulate()
+        assert all(tree.num_roots==1 for tree in ts.trees())
+
+    def test_smc(self):
+        #seed = random.randrange(sys.maxsize)
+        #print("Seed was:", seed)
+        seed = 8008821970698110114
         tables = make_initial_state([4], 100)
         sim = tracker.Simulator(
             initial_state=tables,
@@ -288,11 +329,27 @@ class TestSim:
             recombination_rate=1e-5,
             random_seed=seed,
         )
-        try:
-            sim.simulate()
-        except:
-            print(sim.P[0]._ancestors[0])
-            print(sim.P[0].hulls_left[0])
+        ts = sim.simulate()
+        assert sim.num_re_events > 0
+        assert all(tree.num_roots==1 for tree in ts.trees())
+
+    def test_smc_multipop(self):
+        #seed = random.randrange(sys.maxsize)
+        #print("Seed was:", seed)
+        seed = 3797987320450942652
+        # add migration matrix
+        N = 2
+        migration_matrix = np.zeros((N, N))
+        migration_matrix[0][1] = np.random.uniform(0, 0.05)
+        tables = make_initial_state([2, 2], 100)
+        sim = tracker.Simulator(
+            initial_state=tables,
+            hull_offset=0,
+            recombination_rate=1e-6,
+            random_seed=seed,
+            migration_matrix=migration_matrix,
+        )
+        sim.simulate()
         assert sim.num_re_events > 0
 
 

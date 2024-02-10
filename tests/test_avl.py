@@ -11,24 +11,27 @@ import hulls.hulltracker as tracker
 import hulls.verify as verify
 import hulls.algorithm as alg
 
+
 class TestOrderStatisticsTree:
     def test_simple(self):
         num_values = 20
-        keys = np.arange(num_values)
+        keys = list(range(num_values))
         values = np.random.random(num_values)
         values.sort()
         A = tracker.OrderStatisticsTree()
-        for key, value in zip(keys, values):
-            A[key] = value
-        assert A.min == np.min(keys)
-        A[-1] = 0
-        for i in range(num_values):
-            assert A.rank[i] == i + 1
-        value, rank = A.pop(-1)
+        for i in range(len(keys)):
+            A[keys[i]] = values[i]
+        minimum = keys[0]
+        assert A.min == minimum
+        add_node = -1
+        A[add_node] = 0
+        for i, key in enumerate(keys):
+            assert A.rank[key] == i + 1
+        value, rank = A.pop(add_node)
         assert value == 0
         assert rank == 0
-        for i in range(num_values):
-            assert A.rank[i] == i
+        for i, key in enumerate(keys):
+            assert A.rank[key] == i
         x = np.random.uniform(low=0, high=num_values - 1)
         A[x] = -1
         rank = math.floor(x) + 1
@@ -39,6 +42,7 @@ class TestOrderStatisticsTree:
             key, rank = A.succ_key(key)
         assert A.size == num_values + 1
         assert temp == num_values
+
 
 class TestAVL:
     @pytest.fixture(scope="class")
@@ -104,52 +108,66 @@ class TestAVL:
         obs_pairs = set()
         for i in range(num_pairs):
             sim.P[label].get_random_pair(random_pair, i, label)
-            obs_pairs.add(tuple(random_pair))
+            obs_pairs.add(tuple(sorted(random_pair)))
+        assert len(obs_pairs) == num_pairs
         # node_to_hull_idx = {5:100, 6:99, 7:98, 8:97, 9:96, 10:95, 11:94}
         all_random_pairs = set(
             [
-                (97, 96),
-                (98, 97),
-                (98, 96),
-                (99, 98),
-                (99, 97),
-                (99, 96),
-                (100, 96),
-                (100, 98),
                 (94, 100),
                 (94, 98),
                 (94, 96),
-                (95, 94),
+                (94, 95),
                 (95, 100),
                 (95, 98),
+                (96, 97),
+                (96, 98),
+                (96, 99),
+                (96, 100),
+                (97, 98),
+                (97, 99),
+                (98, 99),
+                (98, 100),
             ]
         )
-        assert obs_pairs == all_random_pairs
+        for pair in obs_pairs:
+            assert pair in all_random_pairs
         # add in new hull
-        old_state = copy.deepcopy(sim.P[0].hulls_left[0])
+        old_avl = copy.deepcopy(sim.P[0].hulls_left[0].avl)
         left = 45
         right = 65
         seg_index = sim.alloc_segment(left, right, -1, pop)
         new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
-        assert sim.P[0].hulls_left[0][new_hull] == 4
+        test_count, _ = sim.P[0].hulls_left[0][new_hull]
+        assert test_count == 4
+        # assert num_pairs:
+        num_pairs = sim.P[0].get_num_pairs()
+        assert num_pairs == 19
+        assert len(sim.P[0].hulls_left[0].avl) == 8
+        assert len(sim.P[0].hulls_left[0].rank) == 8
         # remove this hull again
         sim.P[0].remove_hull(0, new_hull)
         sim.free_hull(new_hull)
         # should be restored to old state
-        for key, value in sim.P[0].hulls_left[0].items():
-            assert old_state[key] == value
+        for key, value in sim.P[0].hulls_left[0].avl.items():
+            assert old_avl[key] == value
+        # check ranks
+        rank_values = set(sim.P[0].hulls_left[0].rank.values())
+        assert rank_values == set(range(len(rank_values)))
         # add in new hull
         left = 20
         right = 60
+        seg_index = sim.alloc_segment(left, right, -1, pop)
         new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
-        assert sim.P[0].hulls_left[0][new_hull] == 2
+        assert sim.P[0].hulls_left[0].avl[new_hull] == 3
+        num_pairs = sim.P[0].get_num_pairs()
+        assert num_pairs == 19
         # remove this hull again
         sim.P[0].remove_hull(0, new_hull)
         sim.free_hull(new_hull)
-        for key, value in sim.P[0].hulls_left[0].items():
-            assert old_state[key] == value
+        for key, value in sim.P[0].hulls_left[0].avl.items():
+            assert old_avl[key] == value
 
     def test_coalescence_event_fixed(self, pre_defined_tables):
         tables = pre_defined_tables
@@ -168,7 +186,7 @@ class TestAVL:
         # print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
 
-    def test_random_coalescence_event(self, pre_defined_tables):
+    def test_coalescence_event_random(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
@@ -185,7 +203,7 @@ class TestAVL:
         verify.verify_hulls(sim)
         verify.verify(sim)
 
-    def test_fixed_recombination(self, pre_defined_tables):
+    def test_recombination_fixed(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
         label = 0
@@ -227,15 +245,14 @@ class TestAVL:
             gene_conversion_length=10,
         )
         label = 0
+        print(y, lbp, tl)
         print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        print(sim.P[0].hulls_left[0].avl)
         y = sim.segments[y]
         print("segment", y)
-        # lbp = 15
-        # tl = 10
         sim.wiuf_gene_conversion_within_event(label, y=y, left_breakpoint=lbp, tl=tl)
         print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        print(sim.P[0].hulls_left[0].avl)
         verify.verify_hulls(sim)
         verify.verify(sim)
 
@@ -316,11 +333,11 @@ class TestSim:
             random_seed=seed,
         )
         ts = sim.simulate()
-        assert all(tree.num_roots==1 for tree in ts.trees())
+        assert all(tree.num_roots == 1 for tree in ts.trees())
 
     def test_smc(self):
-        #seed = random.randrange(sys.maxsize)
-        #print("Seed was:", seed)
+        # seed = random.randrange(sys.maxsize)
+        # print("Seed was:", seed)
         seed = 8008821970698110114
         tables = make_initial_state([4], 100)
         sim = tracker.Simulator(
@@ -330,13 +347,15 @@ class TestSim:
             random_seed=seed,
         )
         ts = sim.simulate()
-        assert sim.num_re_events > 0
-        assert all(tree.num_roots==1 for tree in ts.trees())
 
-    def test_smc_multipop(self):
-        #seed = random.randrange(sys.maxsize)
-        #print("Seed was:", seed)
-        seed = 3797987320450942652
+        assert sim.num_gc_events == 0
+        assert sim.num_re_events > 0
+        assert all(tree.num_roots == 1 for tree in ts.trees())
+
+    @pytest.mark.parametrize('offset', [(0), (3), (5)])
+    def test_smc_multipop(self, offset):
+        seed = random.randrange(sys.maxsize)
+        print("Seed was:", seed)
         # add migration matrix
         N = 2
         migration_matrix = np.zeros((N, N))
@@ -344,8 +363,8 @@ class TestSim:
         tables = make_initial_state([2, 2], 100)
         sim = tracker.Simulator(
             initial_state=tables,
-            hull_offset=0,
-            recombination_rate=1e-6,
+            hull_offset=offset,
+            recombination_rate=5e-6,
             random_seed=seed,
             migration_matrix=migration_matrix,
         )

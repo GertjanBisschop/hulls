@@ -1,4 +1,6 @@
 import bintrees
+import copy
+import dataclasses
 import math
 import msprime
 import numpy as np
@@ -9,24 +11,37 @@ import tskit
 import hulls.algorithm as alg
 import hulls.verify as verify
 
+from typing import Any
+
 
 class Hull:
     def __init__(self, index):
         self.left = None
         self.right = None
         self.ancestor_node = None
-        # index should reflect insertion order
         self.index = index
-        self.count = 0
+        self.insertion_order = math.inf
 
     def __lt__(self, other):
-        return (self.left, self.index) < (other.left, other.index)
+        return (self.left, self.insertion_order) < (other.left, other.insertion_order)
 
     def __repr__(self):
-        return f"{self.left}, {self.right}, {self.index}"
+        return f"l:{self.left}, r:{self.right}, io:{self.insertion_order}"
+
+
+class HullEnd:
+    def __init__(self, x):
+        self.x = x
+        self.insertion_order = math.inf
+
+    def __lt__(self, other):
+        return (self.x, self.insertion_order) < (other.x, other.insertion_order)
+
+    def __repr__(self):
+        return f"x:{self.x}, io:{self.insertion_order}"
+
 
 class OrderStatisticsTree:
-
     def __init__(self):
         self.avl = bintrees.AVLTree()
         self.rank = {}
@@ -37,22 +52,26 @@ class OrderStatisticsTree:
         return self.size
 
     def __setitem__(self, key, value):
-        self.avl[key] = value
         first = True
         rank = 0
         if self.min != None:
             if self.min < key:
-                prev_key, rank = self.prev_key(key)
+                prev_key = self.avl.floor_key(key)
+                rank = self.rank[prev_key]
                 rank += 1
                 first = False
         if first:
             self.min = key
-        self.rank[key] = rank        
+        self.avl[key] = value
+        self.rank[key] = rank
         self.size += 1
         self.update_ranks(key, rank)
 
     def __getitem__(self, key):
         return self.avl[key], self.rank[key]
+
+    def get_rank(self, key):
+        return self.rank[key]
 
     def update_ranks(self, key, rank, increment=1):
         while rank < self.size - 1:
@@ -62,7 +81,10 @@ class OrderStatisticsTree:
 
     def pop(self, key):
         if self.min == key:
-            self.min = self.avl.succ_key(key)
+            if len(self) == 1:
+                self.min = None
+            else:
+                self.min = self.avl.succ_key(key)
         rank = self.rank.pop(key)
         self.update_ranks(key, rank, -1)
         value = self.avl.pop(key)
@@ -86,6 +108,18 @@ class OrderStatisticsTree:
             rank = self.rank[key]
             return key, rank
 
+    def floor_key(self, key):
+        if len(self) == 0:
+            return None
+        if key < self.min:
+            return None
+        return self.avl.floor_key(key)
+
+    def ceil_key(self, key):
+        if len(self) == 0:
+            return None
+        return self.avl.ceiling_key(key)
+
 
 class Simulator:
     def __init__(
@@ -103,9 +137,8 @@ class Simulator:
         additional_nodes=None,
         random_seed=None,
     ):
-        
         if migration_matrix is None:
-            migration_matrix = np.zeros((1,1))
+            migration_matrix = np.zeros((1, 1))
         N = migration_matrix.shape[0]
         assert len(initial_state.populations) == N
         for j in range(N):
@@ -142,8 +175,8 @@ class Simulator:
             s = alg.Segment(j + 1)
             self.segments[j + 1] = s
             self.segment_stack.append(s)
-        self.hull_stack = []
         # double check whether this is maintained/used.
+        self.hull_stack = []
         self.hulls = [None for _ in range(self.max_hulls + 1)]
         for j in range(self.max_segments):
             h = Hull(j + 1)
@@ -151,10 +184,6 @@ class Simulator:
             self.hull_stack.append(h)
         self.S = bintrees.AVLTree()
         self.P = [alg.Population(id_, self.num_labels) for id_ in range(N)]
-        for pop in self.P:
-            for i in range(self.num_labels):
-                pop.hulls_left_rank[i] = alg.FenwickTree(self.L + 1)
-                pop.hulls_right_rank[i] = alg.FenwickTree(self.L + 1)
         if self.recomb_map.total_mass == 0:
             self.recomb_mass_index = None
         else:
@@ -167,9 +196,6 @@ class Simulator:
             self.gc_mass_index = [
                 alg.FenwickTree(self.max_segments) for j in range(self.num_labels)
             ]
-        self.pairwise_count_index = [
-            alg.FenwickTree(self.max_hulls) for j in range(self.num_labels)
-        ]
         self.S = bintrees.AVLTree()
         for pop in self.P:
             pop.set_start_size(population_sizes[pop.id])
@@ -239,21 +265,36 @@ class Simulator:
                     right_end = seg.right
                     seg = seg.next
                 new_hull = self.alloc_hull(left_end, right_end, ancestor_node)
+                # insert Hull
+                floor = self.P[pop].hulls_left[label].floor_key(new_hull)
+                insertion_order = 0
+                if floor is not None:
+                    if floor.left == new_hull.left:
+                        insertion_order = floor.insertion_order + 1
+                new_hull.insertion_order = insertion_order
                 self.P[pop].hulls_left[label][new_hull] = -1
 
         # initialise the correct coalesceable pairs count
         for pop in self.P:
-            for label, avl_tree in enumerate(pop.hulls_left):
-                ranks_left = pop.hulls_left_rank[label]
-                ranks_right = pop.hulls_right_rank[label]
+            for label, ost_left in enumerate(pop.hulls_left):
+                avl = ost_left.avl
+                ost_right = pop.hulls_right[label]
                 count = 0
-                for hull in avl_tree.keys():
-                    num_ending_before_hull = ranks_right.get_cumulative_sum(
-                        hull.left + 1
-                    )
-                    ranks_left.increment(hull.left + 1, 1)
-                    ranks_right.increment(hull.right + 1, 1)
-                    avl_tree[hull] = count - num_ending_before_hull
+                for hull in avl.keys():
+                    floor = ost_right.floor_key(HullEnd(hull.left))
+                    num_ending_before_hull = 0
+                    if floor is not None:
+                        num_ending_before_hull = ost_right.rank[floor] + 1
+                    avl[hull] = count - num_ending_before_hull
+                    # insert HullEnd
+                    hull_end = HullEnd(hull.right)
+                    floor = ost_right.floor_key(hull_end)
+                    insertion_order = 0
+                    if floor is not None:
+                        if floor.x == hull.right:
+                            insertion_order = floor.insertion_order + 1
+                    hull_end.insertion_order = insertion_order
+                    ost_right[hull_end] = -1
                     count += 1
 
     def get_num_ancestors(self):
@@ -290,14 +331,17 @@ class Simulator:
 
     def alloc_hull(self, left, right, ancestor_node):
         alpha = ancestor_node
-        while alpha.prev is not None:
-            alpha = alpha.prev
+        # while alpha.prev is not None:
+        #    alpha = alpha.prev
+        # assert alpha.left == left
         hull = self.hull_stack.pop()
         hull.left = int(left)
         hull.right = min(int(right) + self.hull_offset, self.L)
         hull.ancestor_node = alpha
-        assert alpha.prev is None
-        alpha.hull = hull
+        # assert alpha.prev is None
+        while alpha is not None:
+            alpha.hull = hull
+            alpha = alpha.next
         return hull
 
     def alloc_segment(
@@ -309,6 +353,7 @@ class Simulator:
         prev=None,
         next=None,  # noqa: A002
         label=0,
+        hull=None,
     ):
         """
         Pops a new segment off the stack and sets its properties.
@@ -321,6 +366,7 @@ class Simulator:
         s.next = next
         s.prev = prev
         s.label = label
+        s.hull = hull
         return s
 
     def copy_segment(self, segment):
@@ -332,6 +378,7 @@ class Simulator:
             next=segment.next,
             prev=segment.prev,
             label=segment.label,
+            hull=segment.hull,
         )
 
     def free_segment(self, u):
@@ -349,6 +396,10 @@ class Simulator:
         """
         Frees the specified hull making it ready for reuse.
         """
+        u.left = None
+        u.right = None
+        u.ancestor_node = None
+        u.insertion_order = math.inf
         self.hull_stack.append(u)
 
     def store_node(self, population, flags=0):
@@ -528,7 +579,7 @@ class Simulator:
             for index in non_empty_pops:
                 pop = self.P[index]
                 assert pop.get_num_ancestors() > 0
-                t = pop.get_common_ancestor_waiting_time(self.t)
+                t = pop.get_common_ancestor_waiting_time(self.t, self.rng)
                 if t < t_ca:
                     t_ca = t
                     ca_population = index
@@ -679,23 +730,6 @@ class Simulator:
                     mass_index[segment.label].set_value(segment.index, mass)
             segment = segment.next
 
-    def reset_hull_right(self, hull, old_right, new_right, pop, label):
-        # when resetting the hull.right of a pre-existing hull we need to
-        # decrement count of all lineages starting off between hull.left and bp
-        avl = self.P[pop].hulls_left[label]
-        max_hull = avl.max_key()
-        curr_hull = hull
-        while curr_hull < max_hull:
-            curr_hull = avl.succ_key(curr_hull)
-            if curr_hull.left >= old_right:
-                break
-            if curr_hull.left >= new_right:
-                avl[curr_hull] -= 1
-
-        # adjust rank of hull.right
-        self.P[pop].hulls_right_rank[label].increment(int(old_right) + 1, -1)
-        self.P[pop].hulls_right_rank[label].increment(int(new_right) + 1, 1)
-
     def choose_breakpoint(self, mass_index, rate_map):
         assert mass_index.get_total() > 0
         random_mass = self.rng.uniform(0, mass_index.get_total())
@@ -756,8 +790,8 @@ class Simulator:
         pop = alpha.population
         lhs_hull = lhs_tail.get_hull()
         rhs_right = lhs_hull.right
-        lhs_hull.right = lhs_tail.right + self.hull_offset
-        self.reset_hull_right(lhs_hull, rhs_right, lhs_hull.right, pop, label)
+        lhs_hull.right = min(lhs_tail.right + self.hull_offset, self.L)
+        self.P[pop].reset_hull_right(label, lhs_hull, rhs_right, lhs_hull.right)
         # logic for alpha
         self.set_segment_mass(alpha)
         # create hull for alpha
@@ -909,7 +943,9 @@ class Simulator:
             # rbp lies beyond end of segment chain
             # regular recombination logic applies
             if insert_alpha:
-                self.reset_hull_right(hull, hull_right, reset_right, pop, label)
+                self.P[pop].reset_hull_right(
+                    label, hull, hull_right + self.hull_offset, reset_right
+                )
 
         #        y            z
         #  |  ========== ... ===== |
@@ -992,7 +1028,7 @@ class Simulator:
         # logic is identical to the lhs recombination event
         rhs_right = lhs_hull.right
         lhs_hull.right = int(right + self.hull_offset)
-        self.reset_hull_right(lhs_hull, rhs_right, lhs_hull.right, pop, label)
+        self.P[pop].reset_hull_right(label, lhs_hull, rhs_right, lhs_hull.right)
 
         # rhs
         self.set_segment_mass(alpha)
@@ -1172,8 +1208,14 @@ class Simulator:
         # update right endpoint hull
         # surely this can be improved upon
         if z is not None:
-            right = z.get_right_end()
-            # set seg.hull = None
+            y = z
+            while y is not None:
+                y.hull = hull
+                y = y.prev
+            while z is not None:
+                right = z.right
+                z.hull = hull
+                z = z.next
             hull.right = min(int(right) + self.hull_offset, self.L)
             pop.add_hull(label, hull)
 

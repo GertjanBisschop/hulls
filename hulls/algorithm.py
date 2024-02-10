@@ -4,6 +4,7 @@ import numpy as np
 import random
 import sys
 
+import hulls.hulltracker as hulltracker
 
 class FenwickTree:
     """
@@ -183,12 +184,10 @@ class Population:
 
         # ADDITIONAL STATES FOR SMC(k)
         # this has to be done for each label
-        # track all class::Hull
-        self.hulls_left = [bintrees.AVLTree() for _ in range(num_labels)]
-        # track rank of hulls_left
-        self.hulls_left_rank = [None for _ in range(num_labels)]
-        # track rank of hulls_right
-        self.hulls_right_rank = [None for _ in range(num_labels)]
+        # track hulls based on left
+        self.hulls_left = [hulltracker.OrderStatisticsTree() for _ in range(num_labels)]
+        # track rank of hulls right
+        self.hulls_right = [hulltracker.OrderStatisticsTree() for _ in range(num_labels)]
         self.num_pairs = np.zeros(num_labels, dtype=np.uint64)
 
     def print_state(self):
@@ -225,11 +224,11 @@ class Population:
         # can be improved by updating values in self.num_pairs
         if label is None:
             return sum(
-                sum(count for count in avl_tree.values())
-                for avl_tree in self.hulls_left
+                sum(count for count in ost.avl.values())
+                for ost in self.hulls_left
             )
         else:
-            return sum(count for count in self.hulls_left[label].values())
+            return sum(count for count in self.hulls_left[label].avl.values())
 
     def get_size(self, t):
         """
@@ -263,7 +262,7 @@ class Population:
         return ret
 
     def get_random_pair(self, random_pair, random_count, label):
-        avl = self.hulls_left[label]
+        avl = self.hulls_left[label].avl
         # pick first lineage
         # by traversing the avl tree until
         # the cumulative count of the keys (coalesceable pairs)
@@ -293,25 +292,26 @@ class Population:
 
         return range(int(first_ind), int(last_ind) + 1)
 
-    def increment_avl(self, label, hull, increment):
-        avl = self.hulls_left[label]
+    def increment_avl(self, label, ost, hull, increment):
         right = hull.right
         curr_hull = hull
-        max_hull = avl.max_key()
-        while curr_hull < max_hull:
-            curr_hull = avl.succ_key(curr_hull)
+        curr_hull, _ = ost.succ_key(curr_hull)
+        while curr_hull is not None:
             if right > curr_hull.left:
-                avl[curr_hull] += increment
+                ost.avl[curr_hull] += increment
             else:
                 break
+            curr_hull, _ = ost.succ_key(curr_hull)
 
     def remove_hull(self, label, hull):
-        self.increment_avl(label, hull, -1)
-        count = self.hulls_left[label].pop(hull)
+        ost = self.hulls_left[label]
+        self.increment_avl(label, ost, hull, -1)
+        count, left_rank = ost.pop(hull)
+        ost = self.hulls_right[label]
+        floor = ost.floor_key(hulltracker.HullEnd(hull.right))
+        assert floor.x == hull.right
+        _, right_rank = ost.pop(floor)
         # self.num_pairs[label] -= count
-        # decrement rank
-        self.hulls_left_rank[label].increment(hull.left + 1, -1)
-        self.hulls_right_rank[label].increment(hull.right + 1, -1)
 
     def remove(self, individual, label=0, hull=None):
         """
@@ -319,7 +319,6 @@ class Population:
         """
         # update hull information
         assert individual.left == individual.get_left_end()
-        print(hull, individual.get_hull())
         assert individual.get_hull() == hull
         if hull is not None:
             self.remove_hull(label, hull)
@@ -347,24 +346,38 @@ class Population:
         self.hulls_left[label][hull] -= correction
 
     def add_hull(self, label, hull):
-        left = hull.left
-        num_ending_before_left = self.hulls_right_rank[label].get_cumulative_sum(
-            hull.left + 1
-        )
-        num_starting_after_left = self.hulls_left_rank[label].get_cumulative_sum(
-            hull.left + 1
-        )
+        # logic left end
+        ost_left = self.hulls_left[label]
+        ost_right = self.hulls_right[label]
+        insertion_order = 0
+        num_starting_after_left = 0
+        num_ending_before_left = 0
+
+        floor = ost_left.floor_key(hull)
+        if floor is not None:
+            if floor.left == hull.left:
+                insertion_order = floor.insertion_order + 1
+            num_starting_after_left = ost_left.get_rank(floor) + 1
+        hull.insertion_order = insertion_order
+
+        floor = ost_right.floor_key(hulltracker.HullEnd(hull.left))  
+        if floor is not None:
+            num_ending_before_left = ost_right.get_rank(floor) + 1
         count = num_starting_after_left - num_ending_before_left
-        self.hulls_left[label][hull] = count
-        # correction is needed because the rank implementation in the Python version
-        # assumes that new hulls are added below hulls with the same starting point.
-        self.add_hull_count_correction(label, hull)
+        ost_left[hull] = count
+        
+        # logic right end
+        insertion_order = 0
+        hull_end = hulltracker.HullEnd(hull.right)
+        floor = ost_right.floor_key(hull_end)
+        if floor is not None:
+            if floor.x == hull.right:
+                insertion_order = floor.insertion_order + 1
+        hull_end.insertion_order = insertion_order
+        ost_right[hull_end] = 0
         # self.num_pairs[label] += count - correction
         # Adjust counts for existing hulls in the avl tree
-        self.increment_avl(label, hull, 1)
-        # increment rank
-        self.hulls_left_rank[label].increment(hull.left + 1, 1)
-        self.hulls_right_rank[label].increment(hull.right + 1, 1)
+        self.increment_avl(label, ost_left, hull, 1)
 
     def add(self, individual, label=0, hull=None):
         """

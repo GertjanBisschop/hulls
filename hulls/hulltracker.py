@@ -1,4 +1,6 @@
 import bintrees
+import copy
+import dataclasses
 import math
 import msprime
 import numpy as np
@@ -9,21 +11,32 @@ import tskit
 import hulls.algorithm as alg
 import hulls.verify as verify
 
+from typing import Any
 
 class Hull:
     def __init__(self, index):
         self.left = None
         self.right = None
         self.ancestor_node = None
-        # index should reflect insertion order
         self.index = index
-        self.count = 0
+        self.insertion_order = math.inf
 
     def __lt__(self, other):
-        return (self.left, self.index) < (other.left, other.index)
+        return (self.left, self.insertion_order) < (other.left, other.insertion_order)
 
     def __repr__(self):
-        return f"{self.left}, {self.right}, {self.index}"
+        return f"l:{self.left}, r:{self.right}, io:{self.insertion_order}"
+
+class HullEnd:
+    def __init__(self, x):
+        self.x = x
+        self.insertion_order = math.inf
+
+    def __lt__(self, other):
+        return (self.x, self.insertion_order) < (other.x, other.insertion_order)
+
+    def __repr__(self):
+        return f"x:{self.x}, io:{self.insertion_order}"
 
 class OrderStatisticsTree:
 
@@ -37,22 +50,26 @@ class OrderStatisticsTree:
         return self.size
 
     def __setitem__(self, key, value):
-        self.avl[key] = value
         first = True
         rank = 0
         if self.min != None:
             if self.min < key:
-                prev_key, rank = self.prev_key(key)
+                prev_key = self.avl.floor_key(key)
+                rank = self.rank[prev_key]
                 rank += 1
                 first = False
         if first:
             self.min = key
+        self.avl[key] = value
         self.rank[key] = rank        
         self.size += 1
         self.update_ranks(key, rank)
 
     def __getitem__(self, key):
         return self.avl[key], self.rank[key]
+
+    def get_rank(self, key):
+        return self.rank[key]
 
     def update_ranks(self, key, rank, increment=1):
         while rank < self.size - 1:
@@ -86,6 +103,25 @@ class OrderStatisticsTree:
             rank = self.rank[key]
             return key, rank
 
+    def floor_key(self, key):
+        if len(self) == 0:
+            return None
+        if key < self.min:
+            return None
+        return self.avl.floor_key(key)
+
+    def ceil_key(self, key):
+        if len(self) == 0:
+            return None
+        return self.avl.ceiling_key(key)
+
+    def __deepcopy__(self, memo):
+        ost = OrderStatisticsTree()
+        ost.avl = copy.deepcopy(self.avl)
+        ost.rank = copy.deepcopy(self.rank)
+        ost.min = copy.deepcopy(self.min)
+        ost.size = copy.deepcopy(self.size)
+        return ost
 
 class Simulator:
     def __init__(
@@ -151,10 +187,6 @@ class Simulator:
             self.hull_stack.append(h)
         self.S = bintrees.AVLTree()
         self.P = [alg.Population(id_, self.num_labels) for id_ in range(N)]
-        for pop in self.P:
-            for i in range(self.num_labels):
-                pop.hulls_left_rank[i] = alg.FenwickTree(self.L + 1)
-                pop.hulls_right_rank[i] = alg.FenwickTree(self.L + 1)
         if self.recomb_map.total_mass == 0:
             self.recomb_mass_index = None
         else:
@@ -167,9 +199,6 @@ class Simulator:
             self.gc_mass_index = [
                 alg.FenwickTree(self.max_segments) for j in range(self.num_labels)
             ]
-        self.pairwise_count_index = [
-            alg.FenwickTree(self.max_hulls) for j in range(self.num_labels)
-        ]
         self.S = bintrees.AVLTree()
         for pop in self.P:
             pop.set_start_size(population_sizes[pop.id])
@@ -239,21 +268,36 @@ class Simulator:
                     right_end = seg.right
                     seg = seg.next
                 new_hull = self.alloc_hull(left_end, right_end, ancestor_node)
+                # insert Hull
+                floor = self.P[pop].hulls_left[label].floor_key(new_hull)
+                insertion_order = 0
+                if floor is not None:
+                    if floor.left == new_hull.left:
+                        insertion_order = floor.insertion_order + 1
+                new_hull.insertion_order = insertion_order
                 self.P[pop].hulls_left[label][new_hull] = -1
 
         # initialise the correct coalesceable pairs count
         for pop in self.P:
-            for label, avl_tree in enumerate(pop.hulls_left):
-                ranks_left = pop.hulls_left_rank[label]
-                ranks_right = pop.hulls_right_rank[label]
+            for label, ost_left in enumerate(pop.hulls_left):
+                avl = ost_left.avl
+                ost_right = pop.hulls_right[label]
                 count = 0
-                for hull in avl_tree.keys():
-                    num_ending_before_hull = ranks_right.get_cumulative_sum(
-                        hull.left + 1
-                    )
-                    ranks_left.increment(hull.left + 1, 1)
-                    ranks_right.increment(hull.right + 1, 1)
-                    avl_tree[hull] = count - num_ending_before_hull
+                for hull in avl.keys():
+                    floor = ost_right.floor_key(HullEnd(hull.left))
+                    num_ending_before_hull = 0
+                    if floor is not None:
+                        num_ending_before_hull = ost_right.rank[floor] + 1
+                    avl[hull] = count - num_ending_before_hull
+                    # insert HullEnd
+                    hull_end = HullEnd(hull.right)
+                    floor = ost_right.floor_key(hull_end)
+                    insertion_order = 0
+                    if floor is not None:
+                        if floor.x == hull.right:
+                            insertion_order = floor.insertion_order + 1
+                    hull_end.insertion_order = insertion_order
+                    ost_right[hull_end] = -1
                     count += 1
 
     def get_num_ancestors(self):

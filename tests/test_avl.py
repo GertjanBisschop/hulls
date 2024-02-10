@@ -14,21 +14,23 @@ import hulls.algorithm as alg
 class TestOrderStatisticsTree:
     def test_simple(self):
         num_values = 20
-        keys = np.arange(num_values)
+        keys = list(range(num_values))
         values = np.random.random(num_values)
         values.sort()
         A = tracker.OrderStatisticsTree()
-        for key, value in zip(keys, values):
-            A[key] = value
-        assert A.min == np.min(keys)
-        A[-1] = 0
-        for i in range(num_values):
-            assert A.rank[i] == i + 1
-        value, rank = A.pop(-1)
+        for i in range(len(keys)):
+            A[keys[i]] = values[i]
+        minimum = keys[0]
+        assert A.min == minimum
+        add_node = -1
+        A[add_node] = 0
+        for i, key in enumerate(keys):
+            assert A.rank[key] == i + 1
+        value, rank = A.pop(add_node)
         assert value == 0
         assert rank == 0
-        for i in range(num_values):
-            assert A.rank[i] == i
+        for i, key in enumerate(keys):
+            assert A.rank[key] == i
         x = np.random.uniform(low=0, high=num_values - 1)
         A[x] = -1
         rank = math.floor(x) + 1
@@ -104,52 +106,63 @@ class TestAVL:
         obs_pairs = set()
         for i in range(num_pairs):
             sim.P[label].get_random_pair(random_pair, i, label)
-            obs_pairs.add(tuple(random_pair))
+            obs_pairs.add(tuple(sorted(random_pair)))
+        assert len(obs_pairs) == num_pairs
         # node_to_hull_idx = {5:100, 6:99, 7:98, 8:97, 9:96, 10:95, 11:94}
         all_random_pairs = set(
             [
-                (97, 96),
-                (98, 97),
-                (98, 96),
-                (99, 98),
-                (99, 97),
-                (99, 96),
-                (100, 96),
-                (100, 98),
                 (94, 100),
                 (94, 98),
                 (94, 96),
-                (95, 94),
+                (94, 95),
                 (95, 100),
                 (95, 98),
+                (96, 97),
+                (96, 98),
+                (96, 99),
+                (96, 100),
+                (97, 98),
+                (97, 99),
+                (98, 99),
+                (98, 100),
             ]
         )
-        assert obs_pairs == all_random_pairs
+        for pair in obs_pairs:
+            assert pair in all_random_pairs
         # add in new hull
-        old_state = copy.deepcopy(sim.P[0].hulls_left[0])
+        old_avl = copy.deepcopy(sim.P[0].hulls_left[0].avl)
         left = 45
         right = 65
         seg_index = sim.alloc_segment(left, right, -1, pop)
         new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
-        assert sim.P[0].hulls_left[0][new_hull] == 4
+        test_count, _ = sim.P[0].hulls_left[0][new_hull]
+        assert test_count == 4
+        # assert num_pairs:
+        num_pairs = sim.P[0].get_num_pairs()
+        assert num_pairs == 19
+        assert len(sim.P[0].hulls_left[0].avl) == 8
+        assert len(sim.P[0].hulls_left[0].rank) == 8
         # remove this hull again
         sim.P[0].remove_hull(0, new_hull)
         sim.free_hull(new_hull)
         # should be restored to old state
-        for key, value in sim.P[0].hulls_left[0].items():
-            assert old_state[key] == value
+        for key, value in sim.P[0].hulls_left[0].avl.items():
+            assert old_avl[key] == value
         # add in new hull
         left = 20
         right = 60
         new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
-        assert sim.P[0].hulls_left[0][new_hull] == 2
+        assert False
+        assert sim.P[0].hulls_left[0].avl[new_hull] == 3
+        num_pairs = sim.P[0].get_num_pairs()
+        assert num_pairs == 19
         # remove this hull again
         sim.P[0].remove_hull(0, new_hull)
         sim.free_hull(new_hull)
-        for key, value in sim.P[0].hulls_left[0].items():
-            assert old_state[key] == value
+        for key, value in sim.P[0].hulls_left[0].avl.items():
+            assert old_avl[key] == value
 
     def test_coalescence_event_fixed(self, pre_defined_tables):
         tables = pre_defined_tables

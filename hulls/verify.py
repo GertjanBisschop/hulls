@@ -104,11 +104,10 @@ def verify_hulls(sim):
             num_lineages = len(pop._ancestors[label])
             assert num_lineages == len(pop.hulls_left[label])
             assert (
-                pop.hulls_left_rank[label].get_cumulative_sum(sim.L + 1) == num_lineages
+                max(pop.hulls_left[label].rank.values()) == num_lineages - 1
             )
             assert (
-                pop.hulls_right_rank[label].get_cumulative_sum(sim.L + 1)
-                == num_lineages
+                max(pop.hulls_right[label].rank.values()) == num_lineages - 1
             )
             # verify counts in avl tree
             count = 0

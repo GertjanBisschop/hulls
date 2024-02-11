@@ -115,14 +115,6 @@ class OrderStatisticsTree:
             return None
         return self.avl.ceiling_key(key)
 
-    def __deepcopy__(self, memo):
-        ost = OrderStatisticsTree()
-        ost.avl = copy.deepcopy(self.avl)
-        ost.rank = copy.deepcopy(self.rank)
-        ost.min = copy.deepcopy(self.min)
-        ost.size = copy.deepcopy(self.size)
-        return ost
-
 class Simulator:
     def __init__(
         self,
@@ -341,7 +333,9 @@ class Simulator:
         hull.right = min(int(right) + self.hull_offset, self.L)
         hull.ancestor_node = alpha
         assert alpha.prev is None
-        alpha.hull = hull
+        while alpha is not None:
+            alpha.hull = hull
+            alpha = alpha.next
         return hull
 
     def alloc_segment(
@@ -723,23 +717,6 @@ class Simulator:
                     mass_index[segment.label].set_value(segment.index, mass)
             segment = segment.next
 
-    def reset_hull_right(self, hull, old_right, new_right, pop, label):
-        # when resetting the hull.right of a pre-existing hull we need to
-        # decrement count of all lineages starting off between hull.left and bp
-        avl = self.P[pop].hulls_left[label]
-        max_hull = avl.max_key()
-        curr_hull = hull
-        while curr_hull < max_hull:
-            curr_hull = avl.succ_key(curr_hull)
-            if curr_hull.left >= old_right:
-                break
-            if curr_hull.left >= new_right:
-                avl[curr_hull] -= 1
-
-        # adjust rank of hull.right
-        self.P[pop].hulls_right_rank[label].increment(int(old_right) + 1, -1)
-        self.P[pop].hulls_right_rank[label].increment(int(new_right) + 1, 1)
-
     def choose_breakpoint(self, mass_index, rate_map):
         assert mass_index.get_total() > 0
         random_mass = self.rng.uniform(0, mass_index.get_total())
@@ -801,7 +778,7 @@ class Simulator:
         lhs_hull = lhs_tail.get_hull()
         rhs_right = lhs_hull.right
         lhs_hull.right = lhs_tail.right + self.hull_offset
-        self.reset_hull_right(lhs_hull, rhs_right, lhs_hull.right, pop, label)
+        self.P[pop].reset_hull_right(label, lhs_hull, rhs_right, lhs_hull.right)
         # logic for alpha
         self.set_segment_mass(alpha)
         # create hull for alpha
@@ -953,7 +930,7 @@ class Simulator:
             # rbp lies beyond end of segment chain
             # regular recombination logic applies
             if insert_alpha:
-                self.reset_hull_right(hull, hull_right, reset_right, pop, label)
+                self.P[pop].reset_hull_right(label, hull, hull_right, reset_right)
 
         #        y            z
         #  |  ========== ... ===== |
@@ -1036,7 +1013,7 @@ class Simulator:
         # logic is identical to the lhs recombination event
         rhs_right = lhs_hull.right
         lhs_hull.right = int(right + self.hull_offset)
-        self.reset_hull_right(lhs_hull, rhs_right, lhs_hull.right, pop, label)
+        self.P[pop].reset_hull_right(label, lhs_hull, rhs_right, lhs_hull.right)
 
         # rhs
         self.set_segment_mass(alpha)

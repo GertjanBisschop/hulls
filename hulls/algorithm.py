@@ -292,7 +292,8 @@ class Population:
 
         return range(int(first_ind), int(last_ind) + 1)
 
-    def increment_avl(self, label, ost, hull, increment):
+    def increment_avl(self, ost, hull, increment):
+        
         right = hull.right
         curr_hull = hull
         curr_hull, _ = ost.succ_key(curr_hull)
@@ -303,9 +304,37 @@ class Population:
                 break
             curr_hull, _ = ost.succ_key(curr_hull)
 
+    def reset_hull_right(self, label, hull, old_right, new_right):
+        # when resetting the hull.right of a pre-existing hull we need to
+        # decrement count of all lineages starting off between hull.left and bp
+        # FIX: logic is almost identical as increment_avl()!!!
+        ost = self.hulls_left[label]
+        curr_hull = hull
+        curr_hull, _ = ost.succ_key(curr_hull)
+        while curr_hull is not None:
+            if curr_hull.left >= old_right:
+                break
+            if curr_hull.left >= new_right:
+                ost.avl[curr_hull] -= 1
+            curr_hull, _ = ost.succ_key(curr_hull)
+
+        # adjust rank of hull.right
+        ost = self.hulls_right[label]
+        floor = ost.floor_key(hulltracker.HullEnd(old_right))
+        assert floor.x == old_right
+        ost.pop(floor)
+        insertion_order = 0
+        hull_end = hulltracker.HullEnd(new_right)
+        floor = ost.floor_key(hull_end)
+        if floor is not None:
+            if floor.x == hull_end.x:
+                insertion_order = floor.insertion_order + 1
+        hull_end.insertion_order = insertion_order
+        ost[hull_end] = 0
+
     def remove_hull(self, label, hull):
         ost = self.hulls_left[label]
-        self.increment_avl(label, ost, hull, -1)
+        self.increment_avl(ost, hull, -1)
         count, left_rank = ost.pop(hull)
         ost = self.hulls_right[label]
         floor = ost.floor_key(hulltracker.HullEnd(hull.right))
@@ -377,7 +406,7 @@ class Population:
         ost_right[hull_end] = 0
         # self.num_pairs[label] += count - correction
         # Adjust counts for existing hulls in the avl tree
-        self.increment_avl(label, ost_left, hull, 1)
+        self.increment_avl(ost_left, hull, 1)
 
     def add(self, individual, label=0, hull=None):
         """

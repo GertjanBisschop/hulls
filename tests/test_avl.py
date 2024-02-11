@@ -149,12 +149,14 @@ class TestAVL:
         # should be restored to old state
         for key, value in sim.P[0].hulls_left[0].avl.items():
             assert old_avl[key] == value
+        # check ranks
+        rank_values = set(sim.P[0].hulls_left[0].rank.values())
+        assert rank_values == set(range(len(rank_values)))
         # add in new hull
         left = 20
         right = 60
         new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
-        assert False
         assert sim.P[0].hulls_left[0].avl[new_hull] == 3
         num_pairs = sim.P[0].get_num_pairs()
         assert num_pairs == 19

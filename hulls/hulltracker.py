@@ -943,7 +943,7 @@ class Simulator:
             # rbp lies beyond end of segment chain
             # regular recombination logic applies
             if insert_alpha:
-                self.P[pop].reset_hull_right(label, hull, hull_right, reset_right)
+                self.P[pop].reset_hull_right(label, hull, hull_right + self.hull_offset, reset_right)
 
         #        y            z
         #  |  ========== ... ===== |

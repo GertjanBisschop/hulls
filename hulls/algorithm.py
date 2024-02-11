@@ -344,6 +344,7 @@ class Population:
         floor = ost.floor_key(hulltracker.HullEnd(hull.right))
         assert floor.x == hull.right
         _, right_rank = ost.pop(floor)
+        hull.insertion_order = math.inf
         # self.num_pairs[label] -= count
 
     def remove(self, individual, label=0, hull=None):
@@ -353,12 +354,6 @@ class Population:
         # update hull information
         assert individual.left == individual.get_left_end()
         found = individual.get_hull()
-        if found != hull:
-            print(individual)
-            print('found', found)
-            print('hull', hull)
-            print(self._ancestors[label])
-            print(self.hulls_left[label].avl)
         assert found == hull
         if hull is not None:
             self.remove_hull(label, hull)

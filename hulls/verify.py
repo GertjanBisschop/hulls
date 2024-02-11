@@ -99,12 +99,10 @@ def make_hull(a, L, offset=0):
     while b is not None:
         right = b.right
         assert tracked_hull == b.hull
-        print('b', b)
         b = b.next
     hull.left = left
     hull.right = min(right + offset, L)
     assert tracked_hull.left == hull.left
-    print(tracked_hull.right, hull.right)
     assert tracked_hull.right == hull.right
     assert tracked_hull.ancestor_node == a
     return hull
@@ -116,8 +114,9 @@ def verify_hulls(sim):
             # num ancestors and num hulls should be identical
             num_lineages = len(pop._ancestors[label])
             assert num_lineages == len(pop.hulls_left[label])
-            assert max(pop.hulls_left[label].rank.values()) == num_lineages - 1
-            assert max(pop.hulls_right[label].rank.values()) == num_lineages - 1
+            if num_lineages > 0:
+                assert max(pop.hulls_left[label].rank.values()) == num_lineages - 1
+                assert max(pop.hulls_right[label].rank.values()) == num_lineages - 1
             # verify counts in avl tree
             count = 0
             for a, b in itertools.combinations(pop._ancestors[label], 2):
@@ -126,7 +125,9 @@ def verify_hulls(sim):
                 b_hull = make_hull(b, sim.L, sim.hull_offset)
                 count += intersect_hulls(a_hull, b_hull)
             avl_pairs = pop.get_num_pairs(label)
-            # print("true count:", count, "avl_count:", avl_pairs)
+            print("true count:", count, "avl_count:", avl_pairs)
+            print('lineages', pop._ancestors[label])
+            print('avl', pop.hulls_left[label].avl)
             assert count == avl_pairs
 
 

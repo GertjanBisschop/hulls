@@ -13,6 +13,7 @@ import hulls.verify as verify
 
 from typing import Any
 
+
 class Hull:
     def __init__(self, index):
         self.left = None
@@ -27,6 +28,7 @@ class Hull:
     def __repr__(self):
         return f"l:{self.left}, r:{self.right}, io:{self.insertion_order}"
 
+
 class HullEnd:
     def __init__(self, x):
         self.x = x
@@ -38,8 +40,8 @@ class HullEnd:
     def __repr__(self):
         return f"x:{self.x}, io:{self.insertion_order}"
 
-class OrderStatisticsTree:
 
+class OrderStatisticsTree:
     def __init__(self):
         self.avl = bintrees.AVLTree()
         self.rank = {}
@@ -61,7 +63,7 @@ class OrderStatisticsTree:
         if first:
             self.min = key
         self.avl[key] = value
-        self.rank[key] = rank        
+        self.rank[key] = rank
         self.size += 1
         self.update_ranks(key, rank)
 
@@ -79,7 +81,10 @@ class OrderStatisticsTree:
 
     def pop(self, key):
         if self.min == key:
-            self.min = self.avl.succ_key(key)
+            if len(self) == 1:
+                self.min = None
+            else:
+                self.min = self.avl.succ_key(key)
         rank = self.rank.pop(key)
         self.update_ranks(key, rank, -1)
         value = self.avl.pop(key)
@@ -115,6 +120,7 @@ class OrderStatisticsTree:
             return None
         return self.avl.ceiling_key(key)
 
+
 class Simulator:
     def __init__(
         self,
@@ -131,9 +137,8 @@ class Simulator:
         additional_nodes=None,
         random_seed=None,
     ):
-        
         if migration_matrix is None:
-            migration_matrix = np.zeros((1,1))
+            migration_matrix = np.zeros((1, 1))
         N = migration_matrix.shape[0]
         assert len(initial_state.populations) == N
         for j in range(N):
@@ -170,8 +175,8 @@ class Simulator:
             s = alg.Segment(j + 1)
             self.segments[j + 1] = s
             self.segment_stack.append(s)
-        self.hull_stack = []
         # double check whether this is maintained/used.
+        self.hull_stack = []
         self.hulls = [None for _ in range(self.max_hulls + 1)]
         for j in range(self.max_segments):
             h = Hull(j + 1)
@@ -326,13 +331,14 @@ class Simulator:
 
     def alloc_hull(self, left, right, ancestor_node):
         alpha = ancestor_node
-        while alpha.prev is not None:
-            alpha = alpha.prev
+        #while alpha.prev is not None:
+        #    alpha = alpha.prev
+        #assert alpha.left == left
         hull = self.hull_stack.pop()
         hull.left = int(left)
         hull.right = min(int(right) + self.hull_offset, self.L)
         hull.ancestor_node = alpha
-        assert alpha.prev is None
+        #assert alpha.prev is None
         while alpha is not None:
             alpha.hull = hull
             alpha = alpha.next
@@ -347,6 +353,7 @@ class Simulator:
         prev=None,
         next=None,  # noqa: A002
         label=0,
+        hull=None,
     ):
         """
         Pops a new segment off the stack and sets its properties.
@@ -359,6 +366,7 @@ class Simulator:
         s.next = next
         s.prev = prev
         s.label = label
+        s.hull = hull
         return s
 
     def copy_segment(self, segment):
@@ -370,6 +378,7 @@ class Simulator:
             next=segment.next,
             prev=segment.prev,
             label=segment.label,
+            hull=segment.hull,
         )
 
     def free_segment(self, u):
@@ -387,6 +396,10 @@ class Simulator:
         """
         Frees the specified hull making it ready for reuse.
         """
+        u.left = None
+        u.right = None
+        u.ancestor_node = None
+        u.insertion_order = math.inf
         self.hull_stack.append(u)
 
     def store_node(self, population, flags=0):
@@ -566,7 +579,7 @@ class Simulator:
             for index in non_empty_pops:
                 pop = self.P[index]
                 assert pop.get_num_ancestors() > 0
-                t = pop.get_common_ancestor_waiting_time(self.t)
+                t = pop.get_common_ancestor_waiting_time(self.t, self.rng)
                 if t < t_ca:
                     t_ca = t
                     ca_population = index
@@ -1193,8 +1206,14 @@ class Simulator:
         # update right endpoint hull
         # surely this can be improved upon
         if z is not None:
-            right = z.get_right_end()
-            # set seg.hull = None
+            y = z
+            while y is not None:
+                y.hull = hull
+                y = y.prev
+            while z is not None:
+                right = z.right
+                z.hull = hull
+                z = z.next
             hull.right = min(int(right) + self.hull_offset, self.L)
             pop.add_hull(label, hull)
 

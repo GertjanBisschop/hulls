@@ -6,6 +6,7 @@ import sys
 
 import hulls.hulltracker as hulltracker
 
+
 class FenwickTree:
     """
     A Fenwick Tree to represent cumulative frequency tables over
@@ -187,7 +188,9 @@ class Population:
         # track hulls based on left
         self.hulls_left = [hulltracker.OrderStatisticsTree() for _ in range(num_labels)]
         # track rank of hulls right
-        self.hulls_right = [hulltracker.OrderStatisticsTree() for _ in range(num_labels)]
+        self.hulls_right = [
+            hulltracker.OrderStatisticsTree() for _ in range(num_labels)
+        ]
         self.num_pairs = np.zeros(num_labels, dtype=np.uint64)
 
     def print_state(self):
@@ -224,8 +227,7 @@ class Population:
         # can be improved by updating values in self.num_pairs
         if label is None:
             return sum(
-                sum(count for count in ost.avl.values())
-                for ost in self.hulls_left
+                sum(count for count in ost.avl.values()) for ost in self.hulls_left
             )
         else:
             return sum(count for count in self.hulls_left[label].avl.values())
@@ -237,15 +239,17 @@ class Population:
         dt = t - self.start_time
         return self.start_size * math.exp(-self.growth_rate * dt)
 
-    def get_common_ancestor_waiting_time(self, t):
+    def get_common_ancestor_waiting_time(self, t, rng=None):
         """
         Returns the random waiting time until a common ancestor event
         occurs within this population.
         """
+        if rng is None:
+            rng = random.Random()
         ret = sys.float_info.max
         k = self.get_num_pairs()
         if k > 0:
-            u = random.expovariate(k / 2)  # divide by 2???
+            u = rng.expovariate(k / 2)  # divide by 2???
             if self.growth_rate == 0:
                 ret = self.start_size * u
             else:
@@ -293,7 +297,6 @@ class Population:
         return range(int(first_ind), int(last_ind) + 1)
 
     def increment_avl(self, ost, hull, increment):
-        
         right = hull.right
         curr_hull = hull
         curr_hull, _ = ost.succ_key(curr_hull)
@@ -317,6 +320,7 @@ class Population:
             if curr_hull.left >= new_right:
                 ost.avl[curr_hull] -= 1
             curr_hull, _ = ost.succ_key(curr_hull)
+        hull.right = new_right
 
         # adjust rank of hull.right
         ost = self.hulls_right[label]
@@ -348,7 +352,14 @@ class Population:
         """
         # update hull information
         assert individual.left == individual.get_left_end()
-        assert individual.get_hull() == hull
+        found = individual.get_hull()
+        if found != hull:
+            print(individual)
+            print('found', found)
+            print('hull', hull)
+            print(self._ancestors[label])
+            print(self.hulls_left[label].avl)
+        assert found == hull
         if hull is not None:
             self.remove_hull(label, hull)
         return self._ancestors[label].remove(individual)
@@ -358,21 +369,6 @@ class Population:
         Removes the given individual from its population.
         """
         return self._ancestors[label].remove(individual)
-
-    def add_hull_count_correction(self, label, hull):
-        # correction is needed because the rank implementation in the Python version
-        # assumes that new hulls are added below hulls with the same starting point.
-        correction = 0
-        left = hull.left
-        max_hull = self.hulls_left[label].max_key()
-        curr_hull = hull
-        while curr_hull < max_hull:
-            curr_hull = self.hulls_left[label].succ_key(curr_hull)
-            if curr_hull.left == left:
-                correction += 1
-            else:
-                break
-        self.hulls_left[label][hull] -= correction
 
     def add_hull(self, label, hull):
         # logic left end
@@ -389,12 +385,12 @@ class Population:
             num_starting_after_left = ost_left.get_rank(floor) + 1
         hull.insertion_order = insertion_order
 
-        floor = ost_right.floor_key(hulltracker.HullEnd(hull.left))  
+        floor = ost_right.floor_key(hulltracker.HullEnd(hull.left))
         if floor is not None:
             num_ending_before_left = ost_right.get_rank(floor) + 1
         count = num_starting_after_left - num_ending_before_left
         ost_left[hull] = count
-        
+
         # logic right end
         insertion_order = 0
         hull_end = hulltracker.HullEnd(hull.right)

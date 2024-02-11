@@ -11,6 +11,7 @@ import hulls.hulltracker as tracker
 import hulls.verify as verify
 import hulls.algorithm as alg
 
+
 class TestOrderStatisticsTree:
     def test_simple(self):
         num_values = 20
@@ -41,6 +42,7 @@ class TestOrderStatisticsTree:
             key, rank = A.succ_key(key)
         assert A.size == num_values + 1
         assert temp == num_values
+
 
 class TestAVL:
     @pytest.fixture(scope="class")
@@ -155,6 +157,7 @@ class TestAVL:
         # add in new hull
         left = 20
         right = 60
+        seg_index = sim.alloc_segment(left, right, -1, pop)
         new_hull = sim.alloc_hull(left, right, seg_index)
         sim.P[0].add_hull(0, new_hull)
         assert sim.P[0].hulls_left[0].avl[new_hull] == 3
@@ -183,7 +186,7 @@ class TestAVL:
         # print(sim.P[0].hulls_left[0])
         verify.verify_hulls(sim)
 
-    def test_random_coalescence_event(self, pre_defined_tables):
+    def test_coalescence_event_random(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
@@ -200,7 +203,7 @@ class TestAVL:
         verify.verify_hulls(sim)
         verify.verify(sim)
 
-    def test_fixed_recombination(self, pre_defined_tables):
+    def test_recombination_fixed(self, pre_defined_tables):
         tables = pre_defined_tables
         sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
         label = 0
@@ -242,15 +245,14 @@ class TestAVL:
             gene_conversion_length=10,
         )
         label = 0
+        print(y, lbp, tl)
         print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        print(sim.P[0].hulls_left[0].avl)
         y = sim.segments[y]
         print("segment", y)
-        # lbp = 15
-        # tl = 10
         sim.wiuf_gene_conversion_within_event(label, y=y, left_breakpoint=lbp, tl=tl)
         print(sim.P[0]._ancestors[0])
-        print(sim.P[0].hulls_left[0])
+        print(sim.P[0].hulls_left[0].avl)
         verify.verify_hulls(sim)
         verify.verify(sim)
 
@@ -331,11 +333,11 @@ class TestSim:
             random_seed=seed,
         )
         ts = sim.simulate()
-        assert all(tree.num_roots==1 for tree in ts.trees())
+        assert all(tree.num_roots == 1 for tree in ts.trees())
 
     def test_smc(self):
-        #seed = random.randrange(sys.maxsize)
-        #print("Seed was:", seed)
+        # seed = random.randrange(sys.maxsize)
+        # print("Seed was:", seed)
         seed = 8008821970698110114
         tables = make_initial_state([4], 100)
         sim = tracker.Simulator(
@@ -345,12 +347,14 @@ class TestSim:
             random_seed=seed,
         )
         ts = sim.simulate()
+
+        assert sim.num_gc_events == 0
         assert sim.num_re_events > 0
-        assert all(tree.num_roots==1 for tree in ts.trees())
+        assert all(tree.num_roots == 1 for tree in ts.trees())
 
     def test_smc_multipop(self):
-        #seed = random.randrange(sys.maxsize)
-        #print("Seed was:", seed)
+        # seed = random.randrange(sys.maxsize)
+        # print("Seed was:", seed)
         seed = 3797987320450942652
         # add migration matrix
         N = 2

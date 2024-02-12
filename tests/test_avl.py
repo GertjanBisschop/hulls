@@ -6,8 +6,6 @@ import random
 import sys
 import tskit
 
-
-import hulls.hulltracker as tracker
 import hulls.verify as verify
 import hulls.algorithm as alg
 
@@ -18,7 +16,7 @@ class TestOrderStatisticsTree:
         keys = list(range(num_values))
         values = np.random.random(num_values)
         values.sort()
-        A = tracker.OrderStatisticsTree()
+        A = alg.OrderStatisticsTree()
         for i in range(len(keys)):
             A[keys[i]] = values[i]
         minimum = keys[0]
@@ -91,7 +89,7 @@ class TestAVL:
         sample_count = 10
         for _ in range(sample_count):
             tables.nodes.add_row(flags=tskit.NODE_IS_SAMPLE, time=0, population=0)
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
         )
         pairs = sim.P[0].get_num_pairs()
@@ -99,7 +97,7 @@ class TestAVL:
 
     def test_setup_simple(self, pre_defined_tables):
         tables = pre_defined_tables
-        sim = tracker.Simulator(initial_state=tables)
+        sim = alg.Simulator(initial_state=tables)
         num_pairs = sim.P[0].get_num_pairs()
         assert num_pairs == 14
         random_pair = np.zeros(2, dtype=np.int64)
@@ -171,7 +169,7 @@ class TestAVL:
 
     def test_coalescence_event_fixed(self, pre_defined_tables):
         tables = pre_defined_tables
-        sim = tracker.Simulator(initial_state=tables)
+        sim = alg.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
         # print('start state')
         # print(sim.P[0]._ancestors[0])
@@ -188,7 +186,7 @@ class TestAVL:
 
     def test_coalescence_event_random(self, pre_defined_tables):
         tables = pre_defined_tables
-        sim = tracker.Simulator(initial_state=tables)
+        sim = alg.Simulator(initial_state=tables)
         verify.verify_hulls(sim)
         # print('starting state')
         # print(sim.P[0]._ancestors[0])
@@ -205,7 +203,7 @@ class TestAVL:
 
     def test_recombination_fixed(self, pre_defined_tables):
         tables = pre_defined_tables
-        sim = tracker.Simulator(initial_state=tables, recombination_rate=0.1)
+        sim = alg.Simulator(initial_state=tables, recombination_rate=0.1)
         label = 0
         print(sim.P[0]._ancestors[0])
         print(sim.P[0].hulls_left[0])
@@ -221,7 +219,7 @@ class TestAVL:
         # seed = random.randrange(sys.maxsize)
         # print("Seed was:", seed)
         tables = pre_defined_tables
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables, recombination_rate=0.1, random_seed=seed
         )
         label = 0
@@ -238,7 +236,7 @@ class TestAVL:
     @pytest.mark.parametrize("y, lbp, tl", [(98, 15, 10), (94, 74, 13)])
     def test_gene_conversion_gci_fixed(self, pre_defined_tables, y, lbp, tl):
         tables = pre_defined_tables
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
             recombination_rate=0.1,
             gene_conversion_rate=0.1,
@@ -261,7 +259,7 @@ class TestAVL:
         # seed = random.randrange(sys.maxsize)
         # print("Seed was:", seed)
         tables = pre_defined_tables
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
             recombination_rate=0.1,
             gene_conversion_rate=0.1,
@@ -284,7 +282,7 @@ class TestAVL:
         # seed = random.randrange(sys.maxsize)
         # print("Seed was:", seed)
         tables = pre_defined_tables
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
             recombination_rate=0.1,
             gene_conversion_rate=0.1,
@@ -306,7 +304,7 @@ class TestAVL:
     )
     def test_smck(self, pre_defined_tables, seed, hull_offset):
         tables = pre_defined_tables
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
             hull_offset=hull_offset,
             recombination_rate=0.1,
@@ -327,7 +325,7 @@ class TestSim:
         seed = random.randrange(sys.maxsize)
         print("Seed was:", seed)
         tables = make_initial_state([4], 100)
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
             hull_offset=0,
             random_seed=seed,
@@ -340,7 +338,7 @@ class TestSim:
         # print("Seed was:", seed)
         seed = 8008821970698110114
         tables = make_initial_state([4], 100)
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
             hull_offset=0,
             recombination_rate=1e-5,
@@ -361,7 +359,7 @@ class TestSim:
         migration_matrix = np.zeros((N, N))
         migration_matrix[0][1] = np.random.uniform(0, 0.05)
         tables = make_initial_state([2, 2], 100)
-        sim = tracker.Simulator(
+        sim = alg.Simulator(
             initial_state=tables,
             hull_offset=offset,
             recombination_rate=5e-6,

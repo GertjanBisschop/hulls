@@ -193,7 +193,6 @@ class Population:
         self.coal_mass_index = [FenwickTree(max_segments) for j in range(num_labels)]
         # track rank of hulls right
         self.hulls_right = [OrderStatisticsTree() for _ in range(num_labels)]
-        self.num_pairs = np.zeros(num_labels, dtype=np.uint64)
 
     def print_state(self):
         print("Population ", self.id)

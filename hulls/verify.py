@@ -109,6 +109,10 @@ def make_hull(a, L, offset=0):
     return hull
 
 
+def avl_count_pairs(ost):
+    return sum(value for value in ost.avl.values())
+
+
 def verify_hulls(sim):
     for pop in sim.P:
         for label in range(sim.num_labels):
@@ -125,7 +129,7 @@ def verify_hulls(sim):
                 a_hull = make_hull(a, sim.L, sim.hull_offset)
                 b_hull = make_hull(b, sim.L, sim.hull_offset)
                 count += intersect_hulls(a_hull, b_hull)
-            avl_pairs = pop.get_num_pairs(label)
+            avl_pairs = avl_count_pairs(pop.hulls_left[label])
             if count != avl_pairs:
                 print("lineages", pop._ancestors[label])
                 print("avl", pop.hulls_left[label].avl)

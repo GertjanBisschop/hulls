@@ -1552,10 +1552,8 @@ class Simulator:
 
         # get first element of pair
         hull1_index = mass_index.find(random_mass)
-        print(hull1_index)
         hull1_cumulative_mass = mass_index.get_cumulative_sum(hull1_index)
         remaining_mass = hull1_cumulative_mass - random_mass
-        print(random_mass, hull1_cumulative_mass, remaining_mass)
 
         # get second element of pair
         avl = self.P[pop].hulls_left[label].avl

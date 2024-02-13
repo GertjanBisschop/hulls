@@ -175,7 +175,7 @@ class Population:
     Class representing a population in the simulation.
     """
 
-    def __init__(self, id_, num_labels=1):
+    def __init__(self, id_, num_labels=1, max_segments=100):
         self.id = id_
         self.start_time = 0
         self.start_size = 1.0
@@ -190,10 +190,9 @@ class Population:
         # this has to be done for each label
         # track hulls based on left
         self.hulls_left = [OrderStatisticsTree() for _ in range(num_labels)]
+        self.coal_mass_index = [FenwickTree(max_segments) for j in range(num_labels)]
         # track rank of hulls right
-        self.hulls_right = [
-            OrderStatisticsTree() for _ in range(num_labels)
-        ]
+        self.hulls_right = [OrderStatisticsTree() for _ in range(num_labels)]
         self.num_pairs = np.zeros(num_labels, dtype=np.uint64)
 
     def print_state(self):
@@ -229,11 +228,9 @@ class Population:
     def get_num_pairs(self, label=None):
         # can be improved by updating values in self.num_pairs
         if label is None:
-            return sum(
-                sum(count for count in ost.avl.values()) for ost in self.hulls_left
-            )
+            return sum(mass_index.get_total() for mass_index in self.coal_mass_index)
         else:
-            return sum(count for count in self.hulls_left[label].avl.values())
+            return self.coal_mass_index[label].get_total()
 
     def get_size(self, t):
         """
@@ -268,30 +265,6 @@ class Population:
                     ret = math.log(z) / self.growth_rate
         return ret
 
-    def get_random_pair(self, random_pair, random_count, label):
-        avl = self.hulls_left[label].avl
-        # pick first lineage
-        # by traversing the avl tree until
-        # the cumulative count of the keys (coalesceable pairs)
-        # matches random_count
-        for hull, pairs_count in avl.items():
-            if random_count < pairs_count:
-                random_pair[0] = hull.index
-                break
-            else:
-                random_count -= pairs_count
-        left = hull.left
-
-        # pick second lineage
-        # traverse avl_tree towards smallest element until we
-        # find the random_count^th element that can coalesce with
-        # the first picked hull.
-        while random_count >= 0:
-            hull = avl.prev_key(hull)
-            if hull.left == left or hull.right > left:
-                random_count -= 1
-        random_pair[-1] = hull.index
-
     def get_ind_range(self, t):
         """Returns ind labels at time t"""
         first_ind = np.sum([self.get_size(t_prev) for t_prev in range(0, int(t))])
@@ -299,13 +272,14 @@ class Population:
 
         return range(int(first_ind), int(last_ind) + 1)
 
-    def increment_avl(self, ost, hull, increment):
+    def increment_avl(self, ost, coal_mass, hull, increment):
         right = hull.right
         curr_hull = hull
         curr_hull, _ = ost.succ_key(curr_hull)
         while curr_hull is not None:
             if right > curr_hull.left:
                 ost.avl[curr_hull] += increment
+                coal_mass.increment(curr_hull.index, increment)
             else:
                 break
             curr_hull, _ = ost.succ_key(curr_hull)
@@ -322,6 +296,7 @@ class Population:
                 break
             if curr_hull.left >= new_right:
                 ost.avl[curr_hull] -= 1
+                self.coal_mass_index[label].increment(curr_hull.index, -1)
             curr_hull, _ = ost.succ_key(curr_hull)
         hull.right = new_right
 
@@ -341,14 +316,15 @@ class Population:
 
     def remove_hull(self, label, hull):
         ost = self.hulls_left[label]
-        self.increment_avl(ost, hull, -1)
+        coal_mass_index = self.coal_mass_index[label]
+        self.increment_avl(ost, coal_mass_index, hull, -1)
         count, left_rank = ost.pop(hull)
         ost = self.hulls_right[label]
         floor = ost.floor_key(HullEnd(hull.right))
         assert floor.x == hull.right
         _, right_rank = ost.pop(floor)
         hull.insertion_order = math.inf
-        # self.num_pairs[label] -= count
+        self.coal_mass_index[label].set_value(hull.index, 0)
 
     def remove(self, individual, label=0, hull=None):
         """
@@ -388,6 +364,7 @@ class Population:
             num_ending_before_left = ost_right.get_rank(floor) + 1
         count = num_starting_after_left - num_ending_before_left
         ost_left[hull] = count
+        self.coal_mass_index[label].set_value(hull.index, count)
 
         # logic right end
         insertion_order = 0
@@ -400,7 +377,8 @@ class Population:
         ost_right[hull_end] = 0
         # self.num_pairs[label] += count - correction
         # Adjust counts for existing hulls in the avl tree
-        self.increment_avl(ost_left, hull, 1)
+        coal_mass_index = self.coal_mass_index[label]
+        self.increment_avl(ost_left, coal_mass_index, hull, 1)
 
     def add(self, individual, label=0, hull=None):
         """
@@ -547,7 +525,7 @@ class OrderStatisticsTree:
     def __setitem__(self, key, value):
         first = True
         rank = 0
-        if self.min != None:
+        if self.min is not None:
             if self.min < key:
                 prev_key = self.avl.floor_key(key)
                 rank = self.rank[prev_key]
@@ -629,6 +607,7 @@ class Simulator:
         coalescing_segments_only=True,
         additional_nodes=None,
         random_seed=None,
+        discrete_genome=True,
     ):
         if migration_matrix is None:
             migration_matrix = np.zeros((1, 1))
@@ -651,13 +630,13 @@ class Simulator:
         if isinstance(initial_state, tskit.TreeSequence):
             initial_state = initial_state.dump_tables()
         self.tables = initial_state
-        self.L = int(initial_state.sequence_length)
+        self.L = initial_state.sequence_length
         self.rng = random.Random(random_seed)
 
         self.recomb_map = RateMap([0, self.L], [recombination_rate, 0])
         self.gc_map = RateMap([0, self.L], [gene_conversion_rate, 0])
         self.tract_length = gene_conversion_length
-        self.discrete_genome = True
+        self.discrete_genome = discrete_genome
 
         self.max_segments = max_segments
         self.max_hulls = max_segments
@@ -676,7 +655,9 @@ class Simulator:
             self.hulls[j + 1] = h
             self.hull_stack.append(h)
         self.S = bintrees.AVLTree()
-        self.P = [Population(id_, self.num_labels) for id_ in range(N)]
+        self.P = [
+            Population(id_, self.num_labels, self.max_segments) for id_ in range(N)
+        ]
         if self.recomb_map.total_mass == 0:
             self.recomb_mass_index = None
         else:
@@ -778,7 +759,9 @@ class Simulator:
                     num_ending_before_hull = 0
                     if floor is not None:
                         num_ending_before_hull = ost_right.rank[floor] + 1
-                    avl[hull] = count - num_ending_before_hull
+                    num_pairs = count - num_ending_before_hull
+                    avl[hull] = num_pairs
+                    pop.coal_mass_index[label].set_value(hull.index, num_pairs)
                     # insert HullEnd
                     hull_end = HullEnd(hull.right)
                     floor = ost_right.floor_key(hull_end)
@@ -828,8 +811,8 @@ class Simulator:
         #    alpha = alpha.prev
         # assert alpha.left == left
         hull = self.hull_stack.pop()
-        hull.left = int(left)
-        hull.right = min(int(right) + self.hull_offset, self.L)
+        hull.left = left
+        hull.right = min(right + self.hull_offset, self.L)
         hull.ancestor_node = alpha
         # assert alpha.prev is None
         while alpha is not None:
@@ -1282,12 +1265,12 @@ class Simulator:
         rhs_right = lhs_hull.right
         lhs_hull.right = min(lhs_tail.right + self.hull_offset, self.L)
         self.P[pop].reset_hull_right(label, lhs_hull, rhs_right, lhs_hull.right)
-        
+
         # logic for alpha
         # create hull for alpha
         alpha_hull = self.alloc_hull(alpha.left, rhs_right - self.hull_offset, alpha)
         self.set_segment_mass(alpha)
-        
+
         self.P[alpha.population].add(alpha, label, alpha_hull)
         if self.additional_nodes.value & msprime.NODE_IS_RE_EVENT > 0:
             self.store_node(lhs_tail.population, flags=msprime.NODE_IS_RE_EVENT)
@@ -1329,7 +1312,7 @@ class Simulator:
         x = y.prev
         # generate tract_length
         if tl is None:
-            tl = int(self.generate_gc_tract_length())
+            tl = self.generate_gc_tract_length()
             # print('tract length:', tl)
         assert tl > 0
         right_breakpoint = min(left_breakpoint + tl, self.L)
@@ -1519,7 +1502,7 @@ class Simulator:
         # lhs
         # logic is identical to the lhs recombination event
         rhs_right = lhs_hull.right
-        lhs_hull.right = int(right + self.hull_offset)
+        lhs_hull.right = right + self.hull_offset
         self.P[pop].reset_hull_right(label, lhs_hull, rhs_right, lhs_hull.right)
 
         # rhs
@@ -1560,6 +1543,32 @@ class Simulator:
             else:
                 j = k
 
+    def get_random_pair(self, pop, label, random_mass=None):
+        # pick random pair
+        if random_mass is None:
+            num_pairs = self.P[pop].get_num_pairs(label)
+            random_mass = self.rng.randint(1, num_pairs)
+        mass_index = self.P[pop].coal_mass_index[label]
+
+        # get first element of pair
+        hull1_index = mass_index.find(random_mass)
+        print(hull1_index)
+        hull1_cumulative_mass = mass_index.get_cumulative_sum(hull1_index)
+        remaining_mass = hull1_cumulative_mass - random_mass
+        print(random_mass, hull1_cumulative_mass, remaining_mass)
+
+        # get second element of pair
+        avl = self.P[pop].hulls_left[label].avl
+        hull1 = self.hulls[hull1_index]
+        left = hull1.left
+        hull2 = hull1
+        while remaining_mass >= 0:
+            hull2 = avl.prev_key(hull2)
+            if hull2.left == left or hull2.right > left:
+                remaining_mass -= 1
+
+        return (hull1_index, hull2.index)
+
     def common_ancestor_event(self, population_index, label, random_pair=None):
         """
         Implements a coancestry event.
@@ -1567,17 +1576,12 @@ class Simulator:
         pop = self.P[population_index]
         # Choose two ancestors uniformly according to hulls_left weights
         if random_pair is None:
-            random_pair = -np.ones(2, dtype=np.int64)
-            num_pairs = pop.get_num_pairs()
-            random_count = self.rng.randint(0, num_pairs - 1)
-            pop.get_random_pair(random_pair, random_count, label)
+            random_pair = self.get_random_pair(population_index, label)
         hull_i_ptr, hull_j_ptr = random_pair
         hull_i = self.hulls[hull_i_ptr]
         hull_j = self.hulls[hull_j_ptr]
         x = hull_i.ancestor_node
         y = hull_j.ancestor_node
-        # print(f"random pair: {random_pair}")
-        # print(f"coalescing:{x} + {y}")
         pop.remove(x, label, hull_i)
         pop.remove(y, label, hull_j)
         self.free_hull(hull_i)
@@ -1708,7 +1712,7 @@ class Simulator:
                 right = z.right
                 z.hull = hull
                 z = z.next
-            hull.right = min(int(right) + self.hull_offset, self.L)
+            hull.right = min(right + self.hull_offset, self.L)
             pop.add_hull(label, hull)
 
     def print_state(self):

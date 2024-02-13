@@ -3,7 +3,6 @@ import itertools
 import math
 
 import hulls.algorithm as alg
-import hulls.hulltracker as hulltracker
 
 
 class OverlapCounter:
@@ -91,7 +90,7 @@ def intersect_hulls(a, b):
 
 
 def make_hull(a, L, offset=0):
-    hull = hulltracker.Hull(-1)
+    hull = alg.Hull(-1)
     assert a.prev == None
     left = a.left
     b = a
@@ -131,6 +130,10 @@ def verify_hulls(sim):
                 print("lineages", pop._ancestors[label])
                 print("avl", pop.hulls_left[label].avl)
             assert count == avl_pairs
+            fenwick_pairs = pop.coal_mass_index[label].get_total()
+            if count != fenwick_pairs:
+                print(fenwick_pairs, avl_pairs)
+            assert count == fenwick_pairs
 
 
 def verify_segments(sim):

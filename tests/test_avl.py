@@ -103,11 +103,10 @@ class TestAVL:
         random_pair = np.zeros(2, dtype=np.int64)
         pop = 0
         label = 0
-        obs_pairs = set()
-        for i in range(num_pairs):
-            sim.P[label].get_random_pair(random_pair, i, label)
-            obs_pairs.add(tuple(sorted(random_pair)))
-        assert len(obs_pairs) == num_pairs
+        obs_pairs = []
+        for i in range(1, num_pairs + 1):
+            random_pair = sim.get_random_pair(pop, label, i)
+            obs_pairs.append(tuple(sorted(random_pair)))
         # node_to_hull_idx = {5:100, 6:99, 7:98, 8:97, 9:96, 10:95, 11:94}
         all_random_pairs = set(
             [
@@ -350,7 +349,7 @@ class TestSim:
         assert sim.num_re_events > 0
         assert all(tree.num_roots == 1 for tree in ts.trees())
 
-    @pytest.mark.parametrize('offset', [(0), (3), (5)])
+    @pytest.mark.parametrize("offset", [(0), (3), (5)])
     def test_smc_multipop(self, offset):
         seed = random.randrange(sys.maxsize)
         print("Seed was:", seed)

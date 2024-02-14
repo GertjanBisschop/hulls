@@ -139,6 +139,19 @@ def verify_hulls(sim):
                 print(fenwick_pairs, avl_pairs)
             assert count == fenwick_pairs
 
+            avl = pop.hulls_left[label].avl
+            io = 0
+            left = None
+            for key in avl.keys():
+                if left is None:
+                    left = key.left
+                else:
+                    if left == key.left:
+                        io += 1
+                    else:
+                        io = 0
+                assert io == key.insertion_order
+                left = key.left
 
 def verify_segments(sim):
     for pop in sim.P:

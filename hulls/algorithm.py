@@ -317,7 +317,15 @@ class Population:
         ost = self.hulls_left[label]
         coal_mass_index = self.coal_mass_index[label]
         self.increment_avl(ost, coal_mass_index, hull, -1)
+        # adjust insertion order
+        curr_hull, _ = ost.succ_key(hull)
         count, left_rank = ost.pop(hull)
+        while curr_hull is not None:
+            if curr_hull.left == hull.left:
+                curr_hull.insertion_order -= 1
+            else:
+                break
+            curr_hull, _ = ost.succ_key(curr_hull)
         ost = self.hulls_right[label]
         floor = ost.floor_key(HullEnd(hull.right))
         assert floor.x == hull.right
@@ -563,7 +571,7 @@ class OrderStatisticsTree:
 
     def succ_key(self, key):
         rank = self.rank[key]
-        if self.rank[key] < self.size - 1:
+        if rank < self.size - 1:
             key = self.avl.succ_key(key)
             rank += 1
             return key, rank

@@ -283,10 +283,13 @@ class Population:
                 break
             curr_hull, _ = ost.succ_key(curr_hull)
 
+    def reset_hull_left(self, label, hull, old_left, new_left):
+        pass
+
     def reset_hull_right(self, label, hull, old_right, new_right):
         # when resetting the hull.right of a pre-existing hull we need to
         # decrement count of all lineages starting off between hull.left and bp
-        # FIX: logic is almost identical as increment_avl()!!!
+        # FIX: logic is almost identical to increment_avl()!!!
         ost = self.hulls_left[label]
         curr_hull = hull
         curr_hull, _ = ost.succ_key(curr_hull)
@@ -814,14 +817,10 @@ class Simulator:
 
     def alloc_hull(self, left, right, ancestor_node):
         alpha = ancestor_node
-        # while alpha.prev is not None:
-        #    alpha = alpha.prev
-        # assert alpha.left == left
         hull = self.hull_stack.pop()
         hull.left = left
         hull.right = min(right + self.hull_offset, self.L)
         hull.ancestor_node = alpha
-        # assert alpha.prev is None
         while alpha is not None:
             alpha.hull = hull
             alpha = alpha.next
@@ -1582,21 +1581,58 @@ class Simulator:
         # Choose two ancestors uniformly according to hulls_left weights
         if random_pair is None:
             random_pair = self.get_random_pair(population_index, label)
-        hull_i_ptr, hull_j_ptr = random_pair
-        hull_i = self.hulls[hull_i_ptr]
-        hull_j = self.hulls[hull_j_ptr]
-        x = hull_i.ancestor_node
-        y = hull_j.ancestor_node
-        pop.remove(x, label, hull_i)
-        pop.remove(y, label, hull_j)
-        self.free_hull(hull_i)
-        self.free_hull(hull_j)
-        self.merge_two_ancestors(population_index, label, x, y)
+        hull_x_ptr, hull_y_ptr = random_pair
+        hull_x = self.hulls[hull_x_ptr]
+        hull_y = self.hulls[hull_y_ptr]
+        x = hull_x.ancestor_node
+        y = hull_y.ancestor_node
+        pop.remove(x, label, hull_x)
+        pop.remove(y, label, hull_y)
+        merged_head = self.merge_two_ancestors(population_index, label, x, y)
 
+        # only works in the case when merged_head.left == hull_x.left
+        # and merged_head.right == hull_y.right
+        # head logic
+        head = merged_head.left
+
+        if hull_y.left < hull_x.left:
+            beta = hull_x
+            hull_x = hull_y
+            hull_y = beta
+        # identify head and tail
+        #  hull_x          
+        # ===========| tail
+        #  head|==========
+        #           hull_y 
+        curr_hull = hull_y
+        curr_hull, _ = ost.succ_key(curr_hull)
+        while curr_hull is not None:
+            if curr_hull.left >= hull_x.right:
+                break
+            if curr_hull.left >= hull_y.left:
+                ost.avl[curr_hull] -= 1
+                self.coal_mass_index[label].increment(curr_hull.index, -1)
+            curr_hull, _ = ost.succ_key(curr_hull)
+
+        # tail logic
+        seg = merged_head
+        while seg is not None:
+            right = seg.right
+            seg = seg.next
+        tail = right
+        # if right != hull_y.right!!!
+
+        # update hull x
+        hull_x.right = hull_y.right
+        # free hull y
+        ost.pop(hull_y)
+        self.free_hull(hull_y)
+        
     def merge_two_ancestors(self, population_index, label, x, y, u=-1):
         pop = self.P[population_index]
         self.num_ca_events += 1
         z = None
+        merged_head = None
         coalescence = False
         defrag_required = False
         while x is not None or y is not None:
@@ -1677,9 +1713,8 @@ class Simulator:
             # loop tail; update alpha and integrate it into the state.
             if alpha is not None:
                 if z is None:
-                    # we do not know yet where the hull will end.
-                    hull = self.alloc_hull(alpha.left, alpha.right, alpha)
                     pop.add(alpha, label, None)
+                    merged_head = alpha
                 else:
                     if (coalescence and not self.coalescing_segments_only) or (
                         self.additional_nodes.value & msprime.NODE_IS_CA_EVENT > 0
@@ -1706,19 +1741,7 @@ class Simulator:
         if coalescence:
             self.defrag_breakpoints()
 
-        # update right endpoint hull
-        # surely this can be improved upon
-        if z is not None:
-            y = z
-            while y is not None:
-                y.hull = hull
-                y = y.prev
-            while z is not None:
-                right = z.right
-                z.hull = hull
-                z = z.next
-            hull.right = min(right + self.hull_offset, self.L)
-            pop.add_hull(label, hull)
+        return merged_head
 
     def print_state(self):
         for pop in self.P:

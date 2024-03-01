@@ -342,9 +342,9 @@ class Population:
         """
         # update hull information
         assert individual.left == individual.get_left_end()
-        found = individual.get_hull()
-        assert found == hull
         if hull is not None:
+            found = individual.get_hull()
+            assert found == hull
             self.remove_hull(label, hull)
         return self._ancestors[label].remove(individual)
 
@@ -821,9 +821,9 @@ class Simulator:
         hull.left = left
         hull.right = min(right + self.hull_offset, self.L)
         hull.ancestor_node = alpha
-        while alpha is not None:
-            alpha.hull = hull
-            alpha = alpha.next
+        while alpha.prev is not None:
+            alpha = alpha.prev
+        alpha.hull = hull
         return hull
 
     def alloc_segment(
@@ -1039,7 +1039,6 @@ class Simulator:
         # only worried about label 0 below
         while self.assert_stop_condition():
             verify.verify(self)
-            # self.print_state()
             re_rate = self.get_total_recombination_rate(label=0)
             t_re = infinity
             if re_rate > 0:
@@ -1319,7 +1318,6 @@ class Simulator:
         # generate tract_length
         if tl is None:
             tl = self.generate_gc_tract_length()
-            # print('tract length:', tl)
         assert tl > 0
         right_breakpoint = min(left_breakpoint + tl, self.L)
         if y.left >= right_breakpoint:
@@ -1584,50 +1582,82 @@ class Simulator:
         hull_x_ptr, hull_y_ptr = random_pair
         hull_x = self.hulls[hull_x_ptr]
         hull_y = self.hulls[hull_y_ptr]
+        assert hull_x.left < hull_y.right and hull_x.right > hull_y.left
         x = hull_x.ancestor_node
         y = hull_y.ancestor_node
-        pop.remove(x, label, hull_x)
-        pop.remove(y, label, hull_y)
+        pop.remove(x, label, None)
+        pop.remove(y, label, None)
         merged_head = self.merge_two_ancestors(population_index, label, x, y)
+        simple_merge = True
+        if merged_head is None:
+            simple_merge = False
+        else:
+            if hull_y.left < hull_x.left:
+                beta = hull_x
+                hull_x = hull_y
+                hull_y = beta
+            left = hull_x.left
+            right = max(hull_y.right, hull_x.right)
+            merged_head_right = right
+            overlap_left = hull_y.left
+            overlap_right = min(hull_y.right, hull_x.right)
+            if merged_head.left != left:
+                simple_merge = False
+            if overlap_right == right:
+                seg = merged_head
+                while seg is not None:
+                    merged_head_right = seg.right
+                    seg = seg.next
+                if min(self.L, merged_head_right + self.hull_offset) != right:
+                    simple_merge = False
 
-        # only works in the case when merged_head.left == hull_x.left
-        # and merged_head.right == hull_y.right
-        # head logic
-        head = merged_head.left
-
-        if hull_y.left < hull_x.left:
-            beta = hull_x
-            hull_x = hull_y
-            hull_y = beta
-        # identify head and tail
-        #  hull_x          
-        # ===========| tail
-        #  head|==========
-        #           hull_y 
-        curr_hull = hull_y
-        curr_hull, _ = ost.succ_key(curr_hull)
-        while curr_hull is not None:
-            if curr_hull.left >= hull_x.right:
-                break
-            if curr_hull.left >= hull_y.left:
-                ost.avl[curr_hull] -= 1
-                self.coal_mass_index[label].increment(curr_hull.index, -1)
+        ost = pop.hulls_left[label]
+        if simple_merge:
+            curr_hull = hull_y
             curr_hull, _ = ost.succ_key(curr_hull)
+            ost.pop(hull_y)
+            while curr_hull is not None:
+                if curr_hull.left >= overlap_right:
+                    break
+                if curr_hull.left == hull_y.left:
+                    curr_hull.insertion_order -= 1
+                if curr_hull.left >= hull_y.left:
+                    ost.avl[curr_hull] -= 1
+                    pop.coal_mass_index[label].increment(curr_hull.index, -1)
+                curr_hull, _ = ost.succ_key(curr_hull)
 
-        # tail logic
-        seg = merged_head
-        while seg is not None:
-            right = seg.right
-            seg = seg.next
-        tail = right
-        # if right != hull_y.right!!!
+            # update hull x
+            assert merged_head.prev == None
+            merged_head.hull = hull_x
+            hull_x.ancestor_node = merged_head
+            if hull_x.right != right:
+                hull_end = HullEnd(hull_x.right)
+                floor = pop.hulls_right[label].floor_key(hull_end)
+                assert floor.x == hull_x.right
+                pop.hulls_right[label].pop(floor)
+                hull_x.right = right
+            else:
+                ost = pop.hulls_right[label]
+                floor = ost.floor_key(HullEnd(hull_y.right))
+                assert floor.x == hull_y.right
+                _ = ost.pop(floor)
+            pop.coal_mass_index[label].set_value(hull_y.index, 0)
+            self.free_hull(hull_y)
 
-        # update hull x
-        hull_x.right = hull_y.right
-        # free hull y
-        ost.pop(hull_y)
-        self.free_hull(hull_y)
-        
+        else:
+            # old logic for complex case
+            pop.remove_hull(label, hull_x)
+            pop.remove_hull(label, hull_y)
+            self.free_hull(hull_x)
+            self.free_hull(hull_y)
+            if merged_head is not None:
+                seg = merged_head
+                while seg is not None:
+                    merged_head_right = seg.right
+                    seg = seg.next
+                hull = self.alloc_hull(merged_head.left, merged_head_right, merged_head)
+                pop.add_hull(label, hull)
+
     def merge_two_ancestors(self, population_index, label, x, y, u=-1):
         pop = self.P[population_index]
         self.num_ca_events += 1

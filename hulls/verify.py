@@ -92,18 +92,14 @@ def intersect_hulls(a, b):
 def make_hull(a, L, offset=0):
     hull = alg.Hull(-1)
     assert a.prev == None
-    left = a.left
     b = a
-    tracked_hull = a.hull
+    tracked_hull = a.get_hull()
     while b is not None:
         right = b.right
-        assert tracked_hull == b.hull
         b = b.next
-    hull.left = left
+    hull.left = a.left
     hull.right = min(right + offset, L)
     assert tracked_hull.left == hull.left
-    if tracked_hull.right != hull.right:
-        print(tracked_hull, hull)
     assert tracked_hull.right == hull.right
     assert tracked_hull.ancestor_node == a
     return hull
@@ -152,6 +148,7 @@ def verify_hulls(sim):
                         io = 0
                 assert io == key.insertion_order
                 left = key.left
+
 
 def verify_segments(sim):
     for pop in sim.P:
